@@ -1,6 +1,6 @@
 ---
-name: skill-rec
-description: 当用户想找新的 agent skill、发现可用技能、获得推荐、开启/管理每日 skill 推送时使用。响应明确的「推荐 skill」「有什么新 skill」「帮我找个能...的 skill」以及模糊的「最近有什么好用的工具」「有没有能自动...的」「我想探索新能力」「还有类似的吗」。也处理「开启每日推荐」「关闭每日推荐」「调整推荐偏好」等管理操作。不要等用户说出「推荐」或「skill」这些词才触发——只要表达想发现或获得新工具/能力的意图就应该用。
+name: skill-recommender
+description: 当用户想使用 Skill Recommender 查找新的 agent skill、发现可用技能、获得推荐、开启或管理每日 skill 推送时使用。响应明确的「推荐 skill」「有什么新 skill」「帮我找个能...的 skill」以及模糊的「最近有什么好用的工具」「有没有能自动...的」「我想探索新能力」「还有类似的吗」。也处理「开启每日推荐」「关闭每日推荐」「调整推荐偏好」等管理操作。不要等用户说出「推荐」或「skill」这些词才触发——只要表达想发现或获得新工具/能力的意图就应该用。
 license: MIT
 metadata:
   hermes:
@@ -235,12 +235,12 @@ python3 scripts/feedback.py prompt-daily --source manual
 # 开启每日推荐
 python3 scripts/feedback.py enable-daily
   → 设 daily_rec_status = "enabled"
-  → Agent 随后用 cronjob 工具创建名为 skill-rec-daily 的定时任务
+  → Agent 随后用 cronjob 工具创建名为 skill-recommender-daily 的定时任务
 
 # 关闭每日推荐
 python3 scripts/feedback.py disable-daily
   → 设 daily_rec_status = "disabled"
-  → Agent 随后用 cronjob 工具删除 skill-rec-daily 定时任务
+  → Agent 随后用 cronjob 工具删除 skill-recommender-daily 定时任务
 
 # 当前 Agent 不支持定时任务
 python3 scripts/feedback.py unsupported-daily

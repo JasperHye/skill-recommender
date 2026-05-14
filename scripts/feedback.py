@@ -18,15 +18,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# 项目根目录（skill-rec/）
+# 项目根目录（skill-recommender/）
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_DIR / "data"
 
 # cron 任务配置 — 只写最小信息，具体流程由 SKILL.md 定义
-CRON_JOB_NAME = "skill-rec-daily"
+CRON_JOB_NAME = "skill-recommender-daily"
 CRON_SCHEDULE = "0 2 * * *"  # 10:00 Asia/Shanghai = 02:00 UTC
 CRON_PROMPT = (
-    "Load the skill-rec skill and run its daily workflow. "
+    "Load the skill-recommender skill and run its daily workflow. "
     "If daily_rec_status is not 'enabled', stop silently."
 )
 
@@ -240,7 +240,7 @@ def enable_daily(state_path: Path) -> Dict[str, Any]:
         "cron_job_name": CRON_JOB_NAME,
         "cron_schedule": CRON_SCHEDULE,
         "cron_prompt": CRON_PROMPT,
-        "cron_skills": ["skill-rec"],
+        "cron_skills": ["skill-recommender"],
     }
     print(json.dumps(result, ensure_ascii=False))
     return result
