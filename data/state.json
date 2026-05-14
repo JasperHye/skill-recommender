@@ -1,80 +1,21 @@
 {
   "user_id": "local-user",
-  "daily_rec_enabled": true,
+  "daily_rec_status": "unset",
+  "daily_rec_prompted_at": null,
+  "daily_rec_prompt_source": null,
   "push_time_local": "10:00",
   "timezone": "Asia/Shanghai",
-  "cold_start_complete": false,
-  "cold_start_round": 1,
-  "profile_version": 2,
-  "accepted_skill_ids": [
-    "clawhub:github-pr",
-    "clawhub:docker"
-  ],
-  "installed_skill_ids": [
-    "clawhub:github-pr",
-    "clawhub:docker",
-    "clawhub:scraper"
-  ],
+  "profile_version": 3,
+  "accepted_skill_ids": [],
+  "installed_skill_ids": [],
   "rejected_skill_ids": [],
   "last_actions": [],
+  "accepted_categories": {},
   "diversity_state": {
     "explore_counter": 0,
-    "last_explore_date": null,
     "category_fatigue": {},
     "recent_boosted_category": null,
     "boost_expires": null
   },
-  "last_tier3_sample": null,
-  "_installed_skills_meta": [
-    {
-      "name": "github-pr-workflow",
-      "categories": [
-        "coding",
-        "github"
-      ],
-      "required_toolsets": [
-        "terminal",
-        "git"
-      ],
-      "complexity": "framework"
-    },
-    {
-      "name": "docker-compose",
-      "categories": [
-        "devops",
-        "docker"
-      ],
-      "required_toolsets": [
-        "terminal",
-        "docker"
-      ],
-      "complexity": "framework"
-    },
-    {
-      "name": "web-scraper",
-      "categories": [
-        "web",
-        "data"
-      ],
-      "required_toolsets": [
-        "browser",
-        "web_search"
-      ],
-      "complexity": "lightweight"
-    }
-  ],
-  "accepted_categories": {
-    "coding": {
-      "accepted": 8,
-      "shown": 10
-    },
-    "devops": {
-      "accepted": 6,
-      "shown": 8
-    },
-    "data": {
-      "accepted": 2,
-      "shown": 5
-    }
-  }
+  "_installed_skills_meta": []
 }

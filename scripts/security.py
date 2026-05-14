@@ -1,14 +1,30 @@
-"""安全扫描模块（三层防线）。
+"""安全扫描模块（v3 三层防线）。
 
 L1: 来源可信度
 L2: 元数据完整性
-L3: AgentGuard 深度扫描（可选）
+L3: 危险模式扫描 / AgentGuard 深度扫描
+
+v3 关键变更：
+- 风险只升不降：读取候选已有的 risk_level，最终取 max(existing, scanned)
+- --mode daily：medium 风险进入 blocked
 """
 
 from __future__ import annotations
 
 import re
 from typing import Dict, List, Tuple
+
+# ══════════════════════════════════════════════════════
+# 风险等级（数字越大越严重）
+# ══════════════════════════════════════════════════════
+
+RISK_ORDER: Dict[str, int] = {"low": 0, "medium": 1, "high": 2}
+
+
+def _max_risk(a: str, b: str) -> str:
+    """取两个风险等级中较高的。"""
+    return a if RISK_ORDER.get(a, 0) >= RISK_ORDER.get(b, 0) else b
+
 
 # ══════════════════════════════════════════════════════
 # L1: 来源可信度
@@ -19,6 +35,7 @@ SOURCE_TRUST: Dict[str, int] = {
     "mcpmarket": 4,  # 知名市场
     "smithery":  3,  # 知名市场
     "glama":     2,  # 较小市场
+    "github":    2,  # GitHub（项目质量参差不齐）
     "x":         1,  # 社交平台，不可靠
 }
 
@@ -26,7 +43,6 @@ UNKNOWN_SOURCE_TRUST = 0  # 未知来源 → 自动 medium 风险
 
 
 def _source_trust(source: str) -> int:
-    """返回来源可信度分数。"""
     if not source:
         return UNKNOWN_SOURCE_TRUST
     return SOURCE_TRUST.get(source.lower(), UNKNOWN_SOURCE_TRUST)
@@ -36,22 +52,16 @@ def _source_trust(source: str) -> int:
 # L2: 元数据完整性
 # ══════════════════════════════════════════════════════
 
-# 必须满足至少 2 项
 METADATA_CHECKS = [
     ("source_code_url", "有源码链接"),
     ("has_install_docs", "有安装文档"),
     ("has_security_disclosure", "有安全声明"),
 ]
 
-REQUIRED_METADATA_COUNT = 2  # 至少满足 2 项才算完整
+REQUIRED_METADATA_COUNT = 2
 
 
 def _metadata_check(candidate: Dict) -> Tuple[int, List[str], List[str]]:
-    """检查元数据完整性。
-
-    Returns:
-        (满足数, 满足项, 缺失项)
-    """
     met = []
     missing = []
     for field, label in METADATA_CHECKS:
@@ -63,7 +73,7 @@ def _metadata_check(candidate: Dict) -> Tuple[int, List[str], List[str]]:
 
 
 # ══════════════════════════════════════════════════════
-# L3: 危险模式扫描（基础版，AgentGuard 替代品）
+# L3: 危险模式扫描
 # ══════════════════════════════════════════════════════
 
 RISKY_PATTERNS = [
@@ -82,7 +92,6 @@ SENSITIVE_KEYWORDS = [
 
 
 def _pattern_scan(text: str) -> Tuple[List[str], List[str]]:
-    """危险代码模式扫描。"""
     risky_hits: List[str] = []
     sensitive_hits: List[str] = []
 
@@ -99,25 +108,29 @@ def _pattern_scan(text: str) -> Tuple[List[str], List[str]]:
 
 
 # ══════════════════════════════════════════════════════
-# 主入口
+# 扫描
 # ══════════════════════════════════════════════════════
 
 def scan_candidate(
     candidate: Dict,
+    mode: str = "manual",
     agentguard_available: bool = False,
     agentguard_scan_fn=None,
 ) -> Dict:
-    """对单个候选执行三层安全扫描。
+    """对单个候选执行三层安全扫描。风险只升不降。
 
     Args:
-        candidate: 候选 skill 数据
+        candidate: 候选 skill 数据（可能已有 risk_level）
+        mode: "manual" | "daily" — daily 下 medium 进入 blocked
         agentguard_available: 是否有 AgentGuard
         agentguard_scan_fn: AgentGuard 扫描函数（可选）
 
     Returns:
         {"risk_level": "low"|"medium"|"high", "decision": "pass"|"filter", "details": [...]}
     """
-    risk_level = "low"
+    # 从候选已有风险等级起步（只升不降）
+    existing = candidate.get("risk_level", "low")
+    risk_level = existing if existing in RISK_ORDER else "low"
     details: List[str] = []
     met_conditions = 0
 
@@ -125,14 +138,13 @@ def scan_candidate(
     source = candidate.get("source", "")
     trust = _source_trust(source)
     if trust == 0:
-        risk_level = "medium"
+        risk_level = _max_risk(risk_level, "medium")
         details.append(f"L1: 未知来源 ({source or '无'})，可信度 0")
     elif trust <= 2:
         met_conditions += 1
         details.append(f"L1: 来源 {source} 可信度低 ({trust}/5)")
         if trust == 1:  # X/Twitter
-            if risk_level == "low":
-                risk_level = "medium"
+            risk_level = _max_risk(risk_level, "medium")
     else:
         met_conditions += 1
         details.append(f"L1: 来源 {source} 可信 ({trust}/5)")
@@ -144,12 +156,10 @@ def scan_candidate(
         details.append(f"L2: 元数据齐全 ({', '.join(met_items)})")
     else:
         details.append(f"L2: 元数据不完整 — 缺: {', '.join(missing_items)}")
-        if risk_level == "low":
-            risk_level = "medium"
+        risk_level = _max_risk(risk_level, "medium")
 
     # L3: 模式扫描或 AgentGuard
     if agentguard_available and agentguard_scan_fn:
-        # AgentGuard 深度扫描
         try:
             result = agentguard_scan_fn(candidate)
             if result.get("risk_level") == "high":
@@ -161,8 +171,7 @@ def scan_candidate(
                     "sensitive_hits": [],
                 }
             if result.get("risk_level") == "medium":
-                if risk_level == "low":
-                    risk_level = "medium"
+                risk_level = _max_risk(risk_level, "medium")
                 details.append("L3: AgentGuard 检测到中度风险")
             else:
                 met_conditions += 1
@@ -170,7 +179,6 @@ def scan_candidate(
         except Exception:
             details.append("L3: AgentGuard 扫描失败，跳过")
     else:
-        # 基础模式扫描
         blob = "\n".join([
             str(candidate.get("name", "")),
             str(candidate.get("description", "")),
@@ -188,46 +196,110 @@ def scan_candidate(
             }
 
         if sensitive_hits:
-            if risk_level == "low":
-                risk_level = "medium"
+            risk_level = _max_risk(risk_level, "medium")
             details.append(f"L3: 检测到敏感关键词: {', '.join(sensitive_hits)}")
         else:
             met_conditions += 1
             details.append("L3: 模式扫描无异常")
 
-    # 最终判定
-    if met_conditions >= 2:  # 至少通过两层
-        decision = "pass"
+    # 最终判定：manual 可展示 medium（需标注风险），daily 只允许 low。
+    if risk_level == "high":
+        decision = "filter"
+    elif risk_level == "medium" and mode == "daily":
+        decision = "filter"
+        details.append("MODE: daily 模式下 medium 风险自动拦截")
     else:
-        decision = "filter" if risk_level == "high" else "pass"
+        decision = "pass"
 
-    return {
+    result = {
         "risk_level": risk_level,
         "decision": decision,
         "details": details,
         "risky_hits": [],
         "sensitive_hits": [],
     }
+    # 记录原始候选风险 vs 扫描后风险
+    if existing != risk_level:
+        result["original_risk"] = existing
+        result["details"].insert(0, f"风险升级: {existing} → {risk_level}")
+
+    return result
 
 
 def scan_candidates(
     candidates: List[Dict],
+    mode: str = "manual",
     agentguard_available: bool = False,
     agentguard_scan_fn=None,
 ) -> Tuple[List[Dict], List[Dict]]:
     """批量安全扫描。
 
+    Args:
+        candidates: 候选列表
+        mode: "manual" | "daily"
+        agentguard_available: 是否有 AgentGuard
+        agentguard_scan_fn: AgentGuard 扫描函数
+
     Returns:
-        (通过扫描的候选列表, 被拦截的候选列表)
+        (通过的候选, 被拦截的候选)
     """
     passed = []
     blocked = []
 
     for c in candidates:
-        result = scan_candidate(c, agentguard_available, agentguard_scan_fn)
+        result = scan_candidate(c, mode=mode, agentguard_available=agentguard_available, agentguard_scan_fn=agentguard_scan_fn)
         if result["decision"] == "filter":
             blocked.append({**c, **result})
         else:
             passed.append({**c, **result})
 
     return passed, blocked
+
+
+# ══════════════════════════════════════════════════════
+# CLI
+# ══════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    import argparse
+    import json
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(description="三层安全扫描")
+    parser.add_argument("--input", required=True, help="候选 JSON 文件路径")
+    parser.add_argument("--output", default=None, help="输出文件路径（默认 stdout）")
+    parser.add_argument("--mode", default="manual", choices=["manual", "daily"],
+                        help="manual: 允许 medium 通过 | daily: medium 进入 blocked")
+    parser.add_argument("--agentguard", action="store_true", help="启用 AgentGuard 深度扫描")
+    args = parser.parse_args()
+
+    data = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    if isinstance(data, dict):
+        candidates = data.get("kept", data.get("candidates", []))
+    elif isinstance(data, list):
+        candidates = data
+    else:
+        candidates = []
+
+    passed, blocked = scan_candidates(candidates, mode=args.mode, agentguard_available=args.agentguard)
+
+    result = {
+        "passed": passed,
+        "blocked": blocked,
+        "summary": {
+            "mode": args.mode,
+            "total": len(candidates),
+            "passed": len(passed),
+            "blocked": len(blocked),
+            "by_risk": {
+                "high": len([b for b in blocked if b.get("risk_level") == "high"]),
+                "medium": len([b for b in blocked if b.get("risk_level") == "medium"]),
+            },
+        },
+    }
+
+    output = json.dumps(result, ensure_ascii=False, indent=2)
+    if args.output:
+        Path(args.output).write_text(output, encoding="utf-8")
+    else:
+        print(output)

@@ -1,6 +1,8 @@
-"""状态持久化模块。
+"""状态持久化模块（v3）。
 
-从 v1 迁移，扩展以支持新版 state/profile/history schema。
+确定性操作：读写 JSON 文件。不做任何推理或默认策略决策。
+v3 关键变更：daily_rec_status 改为授权状态机
+（unset | prompted | enabled | disabled | unsupported）。
 """
 
 from __future__ import annotations
@@ -12,24 +14,28 @@ from typing import Any, Dict
 
 DEFAULT_STATE: Dict[str, Any] = {
     "user_id": "local-user",
-    "daily_rec_enabled": True,
+    # "unset" = 未询问过
+    # "prompted" = 已询问但用户未明确同意/拒绝
+    # "enabled" = 用户同意且应存在定时任务
+    # "disabled" = 用户拒绝/关闭
+    # "unsupported" = 当前 Agent 不支持 cron/automation
+    "daily_rec_status": "unset",
+    "daily_rec_prompted_at": None,
+    "daily_rec_prompt_source": None,
     "push_time_local": "10:00",
     "timezone": "Asia/Shanghai",
-    "cold_start_complete": False,
-    "cold_start_round": 1,
-    "profile_version": 2,
+    "profile_version": 3,
     "accepted_skill_ids": [],
     "installed_skill_ids": [],
     "rejected_skill_ids": [],
     "last_actions": [],
+    "accepted_categories": {},
     "diversity_state": {
         "explore_counter": 0,
-        "last_explore_date": None,
         "category_fatigue": {},
         "recent_boosted_category": None,
         "boost_expires": None,
     },
-    "last_tier3_sample": None,
     "_installed_skills_meta": [],
 }
 
@@ -49,22 +55,9 @@ def save_json(path: Path, payload: Dict[str, Any]) -> None:
 
 
 def load_state(path: Path) -> Dict[str, Any]:
+    """加载运行状态。首次使用时返回 DEFAULT_STATE（daily_rec_status="unset"）。"""
     return load_json(path, DEFAULT_STATE)
 
 
 def load_history(path: Path) -> Dict[str, Any]:
     return load_json(path, {"recommendations": []})
-
-
-def load_profile(path: Path) -> Dict[str, Any]:
-    return load_json(path, {
-        "profile_version": 2,
-        "domain_weights": {},
-        "tool_fingerprint": {},
-        "tech_level": "beginner",
-        "cold_start_round": 1,
-        "cold_start_complete": False,
-        "agent_type": "generic",
-        "tier_weights": {"tier1": 1.0},
-        "last_updated": None,
-    })

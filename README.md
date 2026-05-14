@@ -1,122 +1,84 @@
-# Skill Recommender
+# Skill Recommender (skill-rec)
 
-让 AI Agent 自动发现、评估、推荐新 skill 的智能推荐引擎。不用自己逛论坛搜——Agent 会根据你的使用习惯，每天推一个最值得装的 skill。
+Agent 驱动的技能推荐协议。v3 核心设计：SKILL.md 定义决策规则由 Agent 执行，脚本只做确定性状态操作。
 
-## 亮点
+## 设计原则
 
-- 🧠 **画像自学习** — 从你装了哪些 skill、用了哪些工具、聊了什么话题，自动推断偏好
-- 🎯 **五维匹配** — 不光看类别标签，还比对你常用的工具链、技术水平、工作流互补性
-- 🔀 **80/20 探索** — 4 天推你擅长的领域，1 天推点你没试过的
-- 🛡️ **安全扫描** — 来源可信度 + 元数据检查 + 模式扫描，三道防线
-- 🌍 **跨 Agent 通用** — Hermes / Claude Code / OpenClaw / Codex 都能用
-- 📊 **疲劳衰减** — 同类推太多会自动降权，不烦你
+- **Agent 判断，脚本验证** — 上下文推理、排序、话术由 Agent 决定；脚本只做去重/安全/反馈
+- **证据透明** — 推荐理由必须说明依据来源，不编造不可见数据
+- **风险只升不降** — 安全扫描结果不会覆盖已有的更高风险标记
 
-## 安装
+## 使用
 
-> **一句话：把整个 `skill-rec` 文件夹复制到你的 Agent 的 skills 目录下。**
->
-> 接下来 Agent 会自己读 `SKILL.md` 知道怎么运行。你只需要对 Agent 说「推荐个 skill」就能触发。
+### 安装
 
-### Hermes
+把整个目录放到 Agent 的 skills 路径下：
 
 ```bash
-# 终端里执行
-mkdir -p ~/.hermes/skills
+# Hermes
 cp -r skill-rec ~/.hermes/skills/
 
-# 然后打开 Hermes，说：
-# 「推荐个 skill」
+# Claude Code / OpenClaw / Codex 同理
 ```
 
-### Claude Code
+安装或更新后，Agent 应读取 `SKILL.md` 里的 `AGENT POST-INSTALL HOOK`。如果 `daily_rec_status` 还是 `unset`，Agent 会先调用 `scripts/feedback.py prompt-daily --source post_install` 记录“已询问”，再只询问一次是否开启每日推荐。用户回复「开启」后，Agent 调用 `scripts/feedback.py enable-daily` 并用返回的 cron 信息创建 `skill-rec-daily` 定时任务。
 
-```bash
-mkdir -p ~/.claude/skills
-cp -r skill-rec ~/.claude/skills/
+### 触发
 
-# 然后对 Claude Code 说：
-# 「推荐个 skill」
-```
+说「推荐个 skill」「有什么新工具」「帮我找个能...的 skill」。
 
-### OpenClaw
+安装后的 onboarding 会优先询问是否开启每日自动推送（默认关闭，需用户主动「开启」）。如果安装后没有执行 onboarding，首次合适的手动推荐流程也可以补问；但已处于 `prompted/enabled/disabled/unsupported` 时不会反复询问，并且一次只问一个授权问题。
 
-```bash
-mkdir -p ~/.openclaw/skills
-cp -r skill-rec ~/.openclaw/skills/
+### 每日推荐
 
-# 对 OpenClaw 说：
-# 「有什么新 skill 可以装？」
-```
+回复「开启」→ Agent 创建 `skill-rec-daily` cron 任务，每天早上 10:00 自动推送。
 
-安装后不需要做任何配置。Agent 首次触发时会自动初始化，并问你要不要开启每天早上 10:00 的自动推送。
-
-## 用法
-
-### 手动触发
-
-对 Agent 说下面任意一句：
-- 「推荐个 skill」
-- 「有什么新工具」
-- 「帮我找个能自动部署的 skill」
-- 「最近有什么好用的」
-
-Agent 会根据你的画像，从 ClawHub 等渠道搜一圈，挑一个最匹配的推给你。
-
-### 每日自动推送
-
-首次使用时 Agent 会问你要不要开启。回复「开启」，之后每天早上 10:00 自动推一个。
-
-管理命令：
-- 「关闭每日推荐」— 停止自动推送
-- 「调整推荐偏好」— 修改领域权重
-
-## 工作原理
-
-```
-你的使用习惯
-     ↓
-画像引擎 → 分析你装了啥、用了啥
-     ↓
-候选收集 → 从 ClawHub / MCP Market / Smithery 等渠道搜
-     ↓
-过滤 + 安全扫描 → 去重、去已安装、去低质量、安全检查
-     ↓
-五维匹配打分 → 类别 + 工具链 + 复杂度 + 互补 + 行为适应
-     ↓
-多样性调整 → 80/20 探索 + 疲劳衰减
-     ↓
-推荐输出 → 带个性化理由 + 来源链接
-```
+管理命令：「关闭每日推荐」「调整推荐偏好」
 
 ## 文件结构
 
 ```
 skill-rec/
-├── SKILL.md              ← Agent 加载入口
-├── README.md             ← 你正在看
+├── SKILL.md                  ← Agent 加载入口（决策规则）
+├── README.md                 ← 你正在看
 ├── scripts/
-│   ├── profiler.py       ← 画像引擎
-│   ├── ranker.py         ← 过滤 + 五维打分
-│   ├── detector.py       ← Agent 类型探测
-│   ├── diversity.py      ← 多样性引擎
-│   ├── security.py       ← 三层安全扫描
-│   ├── reasoner.py       ← 个性化理由生成
-│   └── state_store.py    ← 状态持久化
-├── data/                 ← 画像、历史、状态文件
-└── references/           ← 收集策略、过滤规则等参考文档
+│   ├── candidate_filter.py   ← 去重 + 冷却 + 已安装过滤 + 每日限额
+│   ├── security.py           ← 三层安全扫描（L1来源 + L2元数据 + L3模式）
+│   ├── feedback.py           ← shown / accept / reject / enable-daily / disable-daily
+│   └── state_store.py        ← JSON 持久化
+├── data/
+│   ├── state.json            ← 运行状态（tri-state daily_rec_status）
+│   ├── history.json          ← 推荐历史
+│   ├── profile.json          ← 用户画像（可选）
+│   └── complement_pairs.json ← 工作流互补关系
+└── references/
+    └── 收集策略.md            ← 候选搜索渠道指引
 ```
 
-## 常见问题
+## 脚本用法
 
-**装了没反应？**  
-检查 `SKILL.md` 是否在 Agent 的 skills 路径下。Hermes 可以用 `skills_list` 确认。确认后直接说「推荐个 skill」触发。
+```bash
+# 候选过滤
+python3 scripts/candidate_filter.py --mode manual|daily \
+  --input candidates.json --state data/state.json --history data/history.json
 
-**推荐的不准？**  
-前 3 次是冷启动阶段，会按 devops → coding → productivity 顺序推热门 skill。3 次后画像积累起来就准了。
+# 安全扫描
+python3 scripts/security.py --mode manual|daily --input filtered.json
 
-**怎么换 Agent？**  
-直接把 `skill-rec` 文件夹复制到新 Agent 的 skills 目录就行。`data/` 里的画像文件也可以一起搬过去。
+# 反馈
+python3 scripts/feedback.py shown --skill-id "..." --categories "devops,web"
+python3 scripts/feedback.py accept --skill-id "..." --categories "devops,web"
+python3 scripts/feedback.py reject --skill-id "..." --categories "devops"
+python3 scripts/feedback.py prompt-daily --source manual
+python3 scripts/feedback.py enable-daily
+python3 scripts/feedback.py disable-daily
+python3 scripts/feedback.py unsupported-daily
+```
 
-## 作者
+`shown` 应在输出推荐后立即调用；后续 `accept/reject` 会更新最近的 shown 记录，而不是新增重复推荐记录。拒绝默认是 14 天冷却，不是永久封禁。
 
-[JasperHye](https://github.com/JasperHye)
+## 版本
+
+- **v3.0.0** — Agent-readable protocol：决策规则在 SKILL.md，脚本只做确定性操作（当前版本）
+- v2.0.0 — 伪推荐引擎：脚本抢决策权（已废弃）
+- v1.0.0 — 过滤+打分流水线（见 v1-archive/）
