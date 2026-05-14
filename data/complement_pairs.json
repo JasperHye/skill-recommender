@@ -1,0 +1,21 @@
+{
+  "_description": "skill 工作流互补关系表。key 是已安装的 skill 名称关键词，value 是互补的 skill 名称关键词。",
+  "github-pr-workflow": ["github-code-review", "github-issues", "ci-cd"],
+  "github-code-review": ["github-pr-workflow", "github-issues"],
+  "docker": ["docker-compose", "kubernetes", "portainer", "container-monitoring"],
+  "docker-compose": ["docker", "kubernetes", "deployment"],
+  "web-scrape": ["browser-automation", "data-extraction", "data-analysis"],
+  "browser-automation": ["web-scrape", "screenshot", "data-extraction"],
+  "terminal": ["shell-script", "automation", "system-monitor"],
+  "file": ["documentation", "backup", "sync"],
+  "git": ["github-pr-workflow", "github-issues", "version-control"],
+  "python": ["testing", "linting", "packaging", "deployment"],
+  "testing": ["ci-cd", "coverage", "mutation-testing"],
+  "openai": ["prompt-engineering", "model-evaluation", "cost-tracking"],
+  "anthropic": ["prompt-engineering", "model-evaluation", "cost-tracking"],
+  "llm": ["prompt-engineering", "evaluation", "fine-tuning", "cost-optimization"],
+  "mcp": ["tool-discovery", "server-management", "mcp-gateway"],
+  "cron": ["scheduling", "monitoring", "alerting"],
+  "monitoring": ["alerting", "logging", "dashboard"],
+  "security": ["audit", "compliance", "vulnerability-scan"]
+}

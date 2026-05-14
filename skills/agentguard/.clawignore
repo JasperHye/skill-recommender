@@ -1,6 +1,0 @@
-node_modules/
-scripts/node_modules/
-scripts/package-lock.json
-scripts/data/registry.json
-*.log
-.DS_Store

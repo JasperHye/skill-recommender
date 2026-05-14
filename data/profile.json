@@ -1,0 +1,11 @@
+{
+  "profile_version": 2,
+  "domain_weights": {},
+  "tool_fingerprint": {},
+  "tech_level": "beginner",
+  "cold_start_round": 1,
+  "cold_start_complete": false,
+  "agent_type": "generic",
+  "tier_weights": {"tier1": 1.0},
+  "last_updated": null
+}
