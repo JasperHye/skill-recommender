@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
-# 将 scripts 目录加入 path，确保在 v2 目录下模块可导入
+# 将 scripts 目录加入 path，确保模块可导入
 _script_dir = Path(__file__).resolve().parent
 if str(_script_dir) not in sys.path:
     sys.path.insert(0, str(_script_dir))

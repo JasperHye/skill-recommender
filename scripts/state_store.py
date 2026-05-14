@@ -1,4 +1,4 @@
-"""状态持久化模块（v2）。
+"""状态持久化模块。
 
 从 v1 迁移，扩展以支持新版 state/profile/history schema。
 """

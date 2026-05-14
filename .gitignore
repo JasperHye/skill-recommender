@@ -1,1 +1,3 @@
-__pycache__/\n.DS_Store\n*.pyc
+__pycache__/
+.DS_Store
+*.pyc

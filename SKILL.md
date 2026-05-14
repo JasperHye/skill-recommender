@@ -10,9 +10,9 @@ metadata:
   compatibility: [hermes, claude-code, openclaw, codex]
 ---
 
-# 每日技能推荐器 v2
+# 每日技能推荐器
 
-每天根据用户行为、领域偏好和生态热度，推荐一个最有价值的 skill。v2 核心升级：画像自学习、五维匹配、跨 Agent 适配。
+每天根据用户行为、领域偏好和生态热度，推荐一个最有价值的 skill。核心能力：画像自学习、五维匹配、跨 Agent 适配。
 
 ## 执行步骤
 

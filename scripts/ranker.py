@@ -1,6 +1,6 @@
 """匹配引擎：过滤 + 五维打分。
 
-Phase 1 (v1) 保留的过滤管道 + v2 新增的五维匹配打分器。
+Phase 1 (v1) 保留的过滤管道 + 新增的五维匹配打分器。
 """
 
 from __future__ import annotations
@@ -441,7 +441,7 @@ def score_candidates(
         risk = c.get("risk_level", "low")
         penalty = _risk_penalty(risk)
 
-        # v2 公式 + keyword boost
+        # 公式 + keyword boost
         kw_boost = _keyword_boost(c, keywords)
         total = (
             0.30 * category_m
