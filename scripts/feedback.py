@@ -26,8 +26,15 @@ DATA_DIR = PROJECT_DIR / "data"
 CRON_JOB_NAME = "skill-recommender-daily"
 CRON_SCHEDULE = "0 2 * * *"  # 10:00 Asia/Shanghai = 02:00 UTC
 CRON_PROMPT = (
-    "Load the skill-recommender skill and run its daily workflow. "
-    "If daily_rec_status is not 'enabled', stop silently."
+    "Load the skill-recommender skill and run its no-approval daily workflow. "
+    "If daily_rec_status is not 'enabled', stop silently. "
+    "Use Agent-native search/browser tools for candidate discovery. "
+    "Do not use shell, curl, wget, python one-liners, git, gh, npm, pip, uvx, "
+    "external CLI search, dependency installation, or network-output pipes. "
+    "Local deterministic helper scripts are allowed only if they do not trigger "
+    "approval, do not access the network, do not install dependencies, and do "
+    "not call external commands. If no no-approval search/browser capability "
+    "exists, follow the daily failure notice policy."
 )
 
 
@@ -207,21 +214,32 @@ def shown(
     state = _load_json(state_path, {})
     history = _load_json(history_path, {"recommendations": []})
 
-    # 更新类别 shown 计数
-    if categories:
+    existing_shown = _find_latest_shown(history, skill_id)
+
+    # 更新类别 shown 计数。重复 shown 只刷新已有记录，不重复计数。
+    if categories and existing_shown is None:
         accepted_cats = state.setdefault("accepted_categories", {})
         for cat in categories:
             entry = accepted_cats.setdefault(cat.lower(), {"accepted": 0, "shown": 0})
             entry["shown"] = entry.get("shown", 0) + 1
 
-    history.setdefault("recommendations", []).append({
-        "date": _utc_now(),
-        "skill_id": skill_id,
-        "name": skill_name,
-        "url": skill_url,
-        "categories": categories or [],
-        "user_action": "shown",
-    })
+    if existing_shown is not None:
+        existing_shown["date"] = _utc_now()
+        if skill_name:
+            existing_shown["name"] = skill_name
+        if skill_url:
+            existing_shown["url"] = skill_url
+        if categories:
+            existing_shown["categories"] = categories
+    else:
+        history.setdefault("recommendations", []).append({
+            "date": _utc_now(),
+            "skill_id": skill_id,
+            "name": skill_name,
+            "url": skill_url,
+            "categories": categories or [],
+            "user_action": "shown",
+        })
 
     _save_json(state_path, state)
     _save_json(history_path, history)

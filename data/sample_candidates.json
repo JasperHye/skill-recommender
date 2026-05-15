@@ -4,7 +4,7 @@
       "skill_id": "clawhub:docker-compose",
       "name": "docker-compose-manager",
       "source": "clawhub",
-      "url": "https://clawhub.com/skills/docker-compose",
+      "url": "https://clawhub.ai/skills/docker-compose",
       "description": "管理 Docker Compose 编排的完整工具链，支持多环境配置和自动化部署，是目前最受欢迎的编排管理 skill 之一",
       "categories": [
         "devops",
@@ -32,7 +32,7 @@
       "skill_id": "clawhub:code-reviewer",
       "name": "ai-code-reviewer",
       "source": "clawhub",
-      "url": "https://clawhub.com/skills/code-reviewer",
+      "url": "https://clawhub.ai/skills/code-reviewer",
       "description": "AI 驱动的代码审查 skill，自动检查 PR 中的代码质量和安全问题，支持多种语言和框架",
       "categories": [
         "coding",
@@ -60,7 +60,7 @@
       "skill_id": "clawhub:web-scraper",
       "name": "web-scraper-pro",
       "source": "clawhub",
-      "url": "https://clawhub.com/skills/web-scraper",
+      "url": "https://clawhub.ai/skills/web-scraper",
       "description": "高级网页爬虫，支持动态渲染和数据提取，适合需要批量采集网页内容的场景",
       "categories": [
         "web",

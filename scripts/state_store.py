@@ -22,6 +22,9 @@ DEFAULT_STATE: Dict[str, Any] = {
     "daily_rec_status": "unset",
     "daily_rec_prompted_at": None,
     "daily_rec_prompt_source": None,
+    "daily_failure_notice_status": "unset",
+    "daily_failure_notice_reason": None,
+    "daily_failure_notice_last_shown_at": None,
     "push_time_local": "10:00",
     "timezone": "Asia/Shanghai",
     "profile_version": 3,
@@ -30,6 +33,14 @@ DEFAULT_STATE: Dict[str, Any] = {
     "rejected_skill_ids": [],
     "last_actions": [],
     "accepted_categories": {},
+    "scenario_memory": {
+        "signals": [],
+        "last_updated_at": None,
+    },
+    "daily_rotation": {
+        "last_theme": None,
+        "last_run_at": None,
+    },
     "diversity_state": {
         "explore_counter": 0,
         "category_fatigue": {},

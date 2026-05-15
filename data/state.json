@@ -3,6 +3,9 @@
   "daily_rec_status": "unset",
   "daily_rec_prompted_at": null,
   "daily_rec_prompt_source": null,
+  "daily_failure_notice_status": "unset",
+  "daily_failure_notice_reason": null,
+  "daily_failure_notice_last_shown_at": null,
   "push_time_local": "10:00",
   "timezone": "Asia/Shanghai",
   "profile_version": 3,
@@ -11,6 +14,14 @@
   "rejected_skill_ids": [],
   "last_actions": [],
   "accepted_categories": {},
+  "scenario_memory": {
+    "signals": [],
+    "last_updated_at": null
+  },
+  "daily_rotation": {
+    "last_theme": null,
+    "last_run_at": null
+  },
   "diversity_state": {
     "explore_counter": 0,
     "category_fatigue": {},

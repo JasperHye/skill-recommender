@@ -10,193 +10,323 @@ metadata:
 
 # 每日技能推荐器
 
-Agent 驱动的技能推荐协议。决策规则写在 SKILL.md 里由 Agent 执行，脚本只做确定性状态操作（校验、去重、安全扫描、反馈写入）。
+Agent 驱动的技能发现协议。Skill Recommender 面向 Hermes、OpenClaw、Claude Code、Codex 和定制 Agent；不要按平台名称硬编码流程，要按当前 Agent 实际可用能力执行。
+
+## 核心原则
+
+1. **Agent 判断，helper 增强**：上下文理解、搜索策略、排序和话术由 Agent 执行；本地脚本只是可选 helper。
+2. **No-approval runtime**：manual/daily 推荐主路径不得触发当前 Agent 的命令或权限审批。
+3. **实时发现，不内置候选池**：不要用 `data/sample_candidates.json` 作为线上兜底；它只用于开发测试。
+4. **场景驱动**：推荐从当前任务、长期场景、能力缺口和生产力跃迁出发，不从已安装列表出发。
+5. **趋势可加分，不可单独成因**：近期热门项目可以提高优先级，但不能覆盖任务匹配、安全和实际价值。
+6. **已安装不等于偏好**：已安装 skill 只用于去重、判断已有能力、覆盖关系和最终 tie-breaker。
+7. **可见即所用**：只使用当前真实可见的用户请求、工具、网页、候选元数据和状态。
+8. **安全只升不降**：high 永不推荐；daily 只推 low；manual 可展示 medium，但必须说明风险。
+9. **One question per turn**：安装授权、daily 开启、失败提醒配置不要塞在同一条回复里。
+
+## Agent Capability Contract
+
+启动 manual 或 daily 流程前，先识别当前 Agent 的能力。不要假设平台一定有某个工具名。
+
+| 能力 | 例子 | 用途 | 缺失时 |
+|------|------|------|--------|
+| `SearchCapability` | `web_search`、`search`、`search_web`、`web_extract`、`WebSearch`、`WebFetch`、搜索 MCP | 直接搜索候选来源 | 尝试浏览器搜索 |
+| `BrowserCapability` | `browser_navigate`、`browser_snapshot`、`open_url`、`fetch_url`、browser/Playwright MCP | 打开搜索页和候选详情页 | manual 引导配置；daily 失败提醒 |
+| `SafeLocalHelperCapability` | 运行 `scripts/*.py` 且不触发审批 | 去重、安全扫描、状态写入增强 | Agent 按本文规则自行过滤 |
+| `StateCapability` | memory/state、skill state、免审批本地 JSON | 记录 shown、反馈、daily failure notice | 降级为对话偏好或 automation/thread 上下文 |
+| `SchedulerCapability` | cron、automation、scheduled task、heartbeat | 每日推荐 | 无法开启 daily，状态设为 `unsupported` |
+
+平台适配提示：
+
+- Hermes：优先 Web Search & Extract；没有专门搜索时可用 Browser Automation 打开搜索页。
+- OpenClaw / 定制 OpenClaw：优先启用 `web_search` 或 browser tool；不要退化到 shell 搜索。
+- Claude Code：优先 WebSearch/WebFetch；避免 Bash 里的 `curl`、`wget`、`python -c`。
+- Codex：优先 web search / browser / automation；本地 helper 可用但不得替代原生搜索。
+- 私有 Agent：满足能力契约即可，不需要工具同名。
+
+## No-approval Runtime
+
+运行时禁止：
+
+- 用 shell 联网搜索或下载候选
+- `curl` / `wget` 获取远程内容
+- `python -c` / `python3 -c` 处理远程 stdin
+- `git` / `gh` / `npm` / `npx` / `pip` / `uvx` 搜索、安装或下载
+- `curl | python`、`curl | sh`、网络输出直接进入解释器或脚本
+- 任何会触发当前 Agent 权限审批的 fallback
+
+运行时允许：
+
+- Agent 原生搜索工具
+- Agent 原生浏览器工具
+- 已安装且免审批的搜索/浏览 MCP
+- 本地确定性 helper，前提是只读写本地 JSON，不联网、不安装依赖、不调用外部命令，且当前 Agent 不会弹审批
+- Agent 对可见网页结果的自然语言解析和排序
+
+如果本地 helper 会触发审批，跳过 helper，按本文规则直接过滤和推荐。
+
+## 推荐信号模型
+
+Skill Recommender 不是“按已安装 skill 猜偏好”的系统。执行推荐时按以下信号判断：
+
+1. **当前任务**：用户此刻想完成什么，是否有明确问题、文件类型、业务目标或工具缺口。
+2. **长期场景/领域**：用户近期反复出现的行业、工作流或生活场景，如教育学习、内容创作、投资研究、文档处理、产品设计、运营、法务合规、个人事务等。
+3. **能力缺口**：当前 Agent 缺少搜索、浏览、文件处理、表格、日历、邮件、知识库、自动化、媒体处理等哪类能力。
+4. **多源候选竞争**：同一需求至少尝试从多个平台找候选，再比较可信度、安装可行性、维护状态和实际覆盖范围。
+5. **网络趋势**：近期在多个来源出现、更新活跃、星标/下载增长或社区讨论增多的能力可以加分。
+6. **生产力跃迁**：候选必须让用户少做一类重复工作、打开新工作流、降低工具切换成本或显著提高质量。
+7. **已安装 skill**：只用于判断重复、已有覆盖、互补关系和最终小权重 tie-breaker。
+
+manual / 当前任务型推荐权重：
+
+- 当前任务匹配度：30%
+- 能力缺口匹配度：20%
+- 长期场景/领域匹配度：15%
+- 生产力跃迁价值：15%
+- 多源可信度和安全：10%
+- 网络趋势热度：5%
+- 已安装 skill 互补性：5%
+
+daily / 探索型推荐权重：
+
+- 长期场景/领域匹配度：25%
+- 网络趋势热度：20%
+- 能力缺口匹配度：20%
+- 生产力跃迁价值：15%
+- 多源可信度和安全：10%
+- 多样性/新鲜度：5%
+- 已安装 skill 互补性：5%
+
+长期场景记忆可以来自状态、当前会话、用户明确偏好、workspace 或近期推荐反馈；没有可靠状态时，只在本轮基于可见证据推断。不要因为用户乱装过某类 skill 就把它当成长期偏好。
+
+`scenario_memory` 和 `daily_rotation` 是 Agent 运行时维护的可选状态，不要求本地 helper 自动推理或写入。当前 Agent 有 `StateCapability` 时可以更新这些字段；没有状态能力或字段为空时，直接按当前可见证据临时判断，不要因为字段为空而阻断推荐。
 
 ## AGENT POST-INSTALL HOOK
 
 安装或更新本 skill 后，Agent 应执行一次轻量 onboarding，用来尽早开启每日推荐，但不能静默创建定时任务。
 
-1. 读取 `data/state.json`。
-2. 如果 `daily_rec_status == "enabled"`，不再询问。
-3. 如果 `daily_rec_status == "disabled"`，不再询问，除非用户主动要求开启。
-4. 如果 `daily_rec_status == "prompted"`，不重复询问，除非用户主动要求开启。
-5. 如果 `daily_rec_status == "unsupported"`，不重复询问，除非用户主动要求开启且当前 Agent 已支持 cron/automation。
-6. 如果 `daily_rec_status == "unset"`，先运行：
-   ```bash
-   python3 scripts/feedback.py prompt-daily --source post_install
-   ```
-   然后只问一个问题：
+1. 读取 `data/state.json`，或读取平台原生 skill state。
+2. `daily_rec_status == "enabled"`：不询问。
+3. `daily_rec_status == "disabled"`：不询问，除非用户主动要求开启。
+4. `daily_rec_status == "prompted"`：不重复询问，除非用户主动要求开启。
+5. `daily_rec_status == "unsupported"`：不重复询问，除非用户主动要求开启且当前 Agent 已有 `SchedulerCapability`。
+6. `daily_rec_status == "unset"`：用 `StateCapability` 或免审批 helper 标记为 `prompted`，然后只问一个问题：
    「要不要开启每日推荐？我会每天早上 10:00 给你推荐一个适合你的实用 AI 自动化能力。回复「开启」我就帮你设置，回复「不用」就保持手动推荐。」
-7. 提问后立即停止输出，等待用户回复。不要在同一条消息里推荐 skill、做基础能力诊断或询问其他授权。
-8. 用户回复「开启」后，运行：
-   ```bash
-   python3 scripts/feedback.py enable-daily
-   ```
-   然后使用返回的 `cron_job_name`、`cron_schedule`、`cron_prompt` 创建 Agent cron/automation。
-9. 用户回复「不用」或拒绝后，运行：
-   ```bash
-   python3 scripts/feedback.py disable-daily
-   ```
-10. 如果当前 Agent 没有 cron/automation 能力，说明无法自动创建定时任务，并运行：
-   ```bash
-   python3 scripts/feedback.py unsupported-daily
-   ```
+7. 提问后立即停止输出，等待用户回复。不要同一条消息里推荐 skill、做基础能力诊断或询问其他授权。
+8. 用户回复「开启」：状态设为 `enabled`，并创建 `skill-recommender-daily` automation。
+9. 用户回复「不用」或拒绝：状态设为 `disabled`。
+10. 当前 Agent 没有 `SchedulerCapability`：说明无法自动创建每日任务，状态设为 `unsupported`。
 
-## 架构原则
+可使用免审批 helper：
 
-1. **Agent 判断，脚本验证** — 上下文推理、冷启动策略、输出话术由 Agent 根据本文规则决定；脚本只处理机械操作
-2. **可见即所用** — 只使用 Agent 当前实际可访问的上下文，不假装有不可见的历史
-3. **证据透明** — 推荐理由必须说明依据来源（最多 5 类，见下）
-4. **安全第一** — medium 风险不自动推，high 风险永不推
-
-## 执行流程
-
-### 路径 A：用户主动请求推荐（manual）
-
-触发条件：用户说「推荐个 skill」「有什么新工具」「帮我找个能...的 skill」等。
-
-```
-Step 1: 收集上下文信号
-Step 2: 获取候选（联网搜索 or 本地缓存）
-Step 3: 脚本校验（去重 + 冷却 + 安全扫描）
-Step 4: Agent 排序 + 选最优
-Step 5: 输出推荐
-Step 6: 处理反馈 → 调 feedback.py
+```bash
+python3 scripts/feedback.py prompt-daily --source post_install
+python3 scripts/feedback.py enable-daily
+python3 scripts/feedback.py disable-daily
+python3 scripts/feedback.py unsupported-daily
 ```
 
-### 路径 B：每日自动推送（daily）
+这些命令只在不会触发审批时使用；否则使用平台原生状态能力或对话状态。
 
-触发条件：cron 调度触发。入口相同，但多了授权检查。
+## Manual 推荐流程
 
+触发条件：用户说「推荐个 skill」「有什么新工具」「帮我找个能...的 skill」「最近有什么好用的工具」等。
+
+1. 收集上下文信号：用户当前请求、长期场景/领域、能力缺口、workspace、可用工具、已安装 skill、候选来源和趋势证据。
+2. 诊断当前 Agent 是否已有能力能覆盖需求；已有能力时优先告诉用户怎么用，不重复推荐安装。
+3. 检查 `SearchCapability` / `BrowserCapability`。
+4. 有搜索能力：按 multi-recall 搜索候选，至少尝试当前任务、长期场景、能力缺口、趋势四类查询。
+5. 无搜索但有浏览器能力：打开 Brave Search 网页版或 DuckDuckGo 搜索页，按同样的 multi-recall 查询读取结果。
+6. 搜索/浏览能力都没有：不要 shell fallback；告诉用户当前缺少无审批搜索/浏览能力，并建议启用当前 Agent 的原生搜索或浏览能力。根据平台给出对应建议。
+7. 合并 15-25 个候选，跨平台去重，过滤安全和已有覆盖，再按 manual 权重排序。
+8. 如有 `StateCapability` 或免审批 helper，记录 `shown`；否则不强制写文件。
+
+## Daily 推荐流程
+
+触发条件：`skill-recommender-daily` automation。
+
+1. `daily_rec_status != "enabled"`：静默退出。
+2. 检查 `SearchCapability` / `BrowserCapability`。
+3. 选择今日探索主题：长期场景、能力缺口、网络趋势三类轮换；无状态时优先长期场景，其次趋势。
+4. 有搜索能力：按 Scenario Recall、Gap Recall、Trend Recall、Diversity Recall 搜索候选。
+5. 无搜索但有浏览器能力：打开 Brave Search 网页版或 DuckDuckGo 搜索页，按同样召回路径读取结果。
+6. 搜索/浏览能力都没有：进入 Daily Failure Notice。
+7. 只允许 low 风险候选；medium/high 不推。
+8. 候选必须有明确生产力跃迁；只有“热门”但无实际场景价值时不推。
+9. 输出 1 个推荐；如有状态能力，记录 `shown`、去重信息和今日探索主题。
+10. 没有合格候选时静默，不硬推。
+
+Cron/automation prompt 应表达以下约束：
+
+```text
+Load the skill-recommender skill and run its no-approval daily workflow. If daily_rec_status is not 'enabled', stop silently. Use Agent-native search/browser tools for candidate discovery. Do not use shell, curl, wget, python one-liners, git, gh, npm, pip, uvx, external CLI search, dependency installation, or network-output pipes. Local deterministic helper scripts are allowed only if they do not trigger approval, do not access the network, do not install dependencies, and do not call external commands. If no no-approval search/browser capability exists, follow the daily failure notice policy.
 ```
-Step 0: 检查 state.daily_rec_status == "enabled"，否则静默退出
-Step 1-6: 同 manual 流程
+
+## Daily Failure Notice
+
+当 daily 已开启，但运行时没有无审批搜索/浏览能力时，不要每天静默失败，也不要每天骚扰用户。
+
+状态字段：
+
+```json
+{
+  "daily_failure_notice_status": "unset",
+  "daily_failure_notice_reason": null,
+  "daily_failure_notice_last_shown_at": null
+}
 ```
 
-### Step 1: 收集上下文信号
+状态含义：
 
-从以下来源收集信号（按优先级），**每个推荐必须声明用了哪些**：
+- `unset`：从未提醒过
+- `shown`：已经提醒过一次，用户未明确关闭
+- `dismissed`：用户选择不再提醒
+- `resolved`：后来检测到搜索/浏览能力恢复
 
-| # | 信号源 | 获取方式 |
-|---|--------|----------|
-| 1 | 用户当前请求中的关键词 | 直接从用户消息提取 |
-| 2 | 当前 workspace / 项目类型 | 看当前目录、文件类型 |
-| 3 | 已安装 skill 列表 | 用 `skills_list` 获取，提取 categories |
-| 4 | 可用工具列表 | Agent 自身能力 |
-| 5 | 候选来源和生态热度 | 搜索时获取的 stars/downloads |
+行为：
 
-**规则**：
-- 证据缺失时跳过，不编造
-- 冷启动用户（无历史推荐记录）：优先使用信号 1、2、3
-- 有历史记录的用户：额外参考上次接受的类别
+1. `unset` 或 `resolved`：发送一次失败提醒，并尽量标记为 `shown`。
+2. `shown`：默认静默退出，不每天重复提醒。
+3. `dismissed`：静默退出，除非用户主动恢复提醒。
 
-### Step 2: 获取候选
+提醒文案必须包含：
 
-Agent 自行从以下渠道收集候选（使用 web_search / browser 工具）：
+- 今日技能推荐失败
+- 原因：当前 Agent 没有可用的无审批联网搜索或浏览能力
+- 建议：启用当前 Agent 的原生搜索/浏览能力
+- 选择：「帮我配置」「稍后再说」「不再提醒」
 
-**主渠道**（按优先级）：
-1. **ClawHub** — 搜索 `site:clawhub.ai skills trending` 或浏览器打开 clawhub.ai
-2. **MCP Market** — 搜索 `site:mcpmarket.com skills`
-3. **Smithery** — 搜索 `site:smithery.ai new skills`
-4. **Glama** — 搜索 `site:glama.ai mcp servers`
-5. **GitHub** — 搜索 `mcp server skill trending`（替代 X/Twitter，X 需要登录）
+平台化建议：
 
-**策略**：
-- 每个可用渠道取前 5 个候选
-- 同一 skill 出现在多来源 → 保留可信度最高的来源
-- 如果所有渠道不可用 → 用 `data/sample_candidates.json` 缓存兜底
-- 候选 < 3 个时，降低最低分阈值
+- Hermes：Web Search & Extract 或 Browser Automation
+- OpenClaw：`web_search` 或 browser tool
+- Claude Code：WebSearch/WebFetch
+- Codex：web search / browser / automation
+- 私有 Agent：启用等价的 search/browser capability
 
-每个候选归一化为：
+不要默认要求用户申请 API key。不要默认推荐 Brave Search MCP、Tavily、Exa、Perplexity；这些可作为用户追问时的增强选项。
+
+## 候选收集
+
+优先来源：
+
+1. ClawHub
+2. MCP Market
+3. Smithery
+4. Glama
+5. GitHub
+
+搜索方式：
+
+- 有 `SearchCapability`：用原生搜索工具搜 `site:clawhub.ai skills trending`、`site:mcpmarket.com skills`、`site:smithery.ai new skills`、`site:glama.ai mcp servers`、`mcp server skill trending`。
+- 只有 `BrowserCapability`：打开 Brave Search 网页版或 DuckDuckGo，读取搜索结果和详情页。
+- X/Twitter 不作为 daily 默认来源；manual 探索可用但至少 medium 风险。
+- 不用固定候选池兜底；`data/sample_candidates.json` 只用于测试。
+
+multi-recall 查询路径：
+
+1. **Task Recall**：围绕用户当前请求搜索，例如“PDF summarize agent skill”“calendar automation skill”。
+2. **Scenario Recall**：围绕长期场景搜索，例如“education AI skill”“content creation agent skill”。
+3. **Gap Recall**：围绕缺失能力搜索，例如“browser automation skill”“spreadsheet agent skill”。
+4. **Trend Recall**：搜索近期热门或更新活跃项目，例如“trending MCP server”“new agent skill this week”。
+5. **Diversity Recall**：daily 可额外找一个非重复但大众高频的新场景，避免长期只推同类。
+
+每条路径最多保留 5 个候选；总候选建议 15-25 个。候选必须来自当前可见网页或搜索结果，不要凭记忆编造。
+
+候选归一化字段：
+
 ```json
 {
   "skill_id": "source:name-lower",
   "name": "Skill Name",
   "url": "https://...",
-  "source_code_url": "GitHub URL（可选，缺失会导致安全扫描降级）",
+  "source_code_url": "GitHub URL",
   "description": "一句话描述",
-  "categories": ["cat1", "cat2"],
-  "source": "clawhub|mcpmarket|smithery|glama|github",
+  "categories": ["documents", "web-research"],
+  "source": "clawhub|mcpmarket|smithery|glama|github|x",
   "updated_at": "ISO 8601",
   "popularity": {"downloads": 0, "stars": 0},
-  "required_toolsets": ["从描述推断"],
+  "required_toolsets": ["browser"],
   "complexity": "lightweight|framework|platform",
-  "has_install_docs": true/false,
-  "has_security_disclosure": true/false
+  "trend": {
+    "source_count": 1,
+    "recent_mentions": 0,
+    "updated_recently": true,
+    "trend_reason": "近期在多个来源出现或增长较快"
+  },
+  "has_install_docs": true,
+  "has_security_disclosure": false,
+  "risk_level": "low|medium|high"
 }
 ```
-> `source_code_url` / `has_install_docs` / `has_security_disclosure` 三字段影响安全扫描结果。缺失任一都会导致 risk_level 至少 medium。
 
-### Step 3: 脚本校验
+## 过滤与安全
 
-将候选列表写入临时文件，调用脚本做机械校验：
+Agent 运行时按以下规则过滤。可用免审批 helper 时可以用 `scripts/candidate_filter.py` 和 `scripts/security.py` 增强，但不要依赖它们。
 
-**手动推荐（manual）：**
-```bash
-python3 scripts/candidate_filter.py --mode manual --input /tmp/candidates.json --state data/state.json --history data/history.json
-python3 scripts/security.py --mode manual --input /tmp/filtered.json
-```
+过滤规则：
 
-**每日推送（daily）：**
-```bash
-python3 scripts/candidate_filter.py --mode daily --input /tmp/candidates.json --state data/state.json --history data/history.json
-python3 scripts/security.py --mode daily --input /tmp/filtered.json
-```
+- 去重：`skill_id` 和归一化名称重复时保留可信度最高来源。
+- 已安装过滤：已安装 skill 不再推荐。
+- 冷却：14 天内拒绝过的跳过；30 天内展示过的跳过。
+- 质量：描述太短、来源不明、没有详情页或没有安装说明的降权或过滤。
+- 生产力跃迁：不能减少重复工作、打开新工作流、降低工具切换成本或提升输出质量的候选降权；daily 直接过滤。
+- 趋势约束：网络热门只能加分；如果任务不匹配、风险过高或安装不可行，不得推荐。
+- daily 限额：automation 本身应每天最多运行一次；如有状态能力，再按本地日期去重。
 
-`--mode daily` 的区别：
-- `candidate_filter`：按 `state.timezone` 检查今天是否已推过任何 skill，有则全部过滤
-- `security`：medium 风险候选进入 blocked（不通过）
+安全规则：
 
-脚本自动完成：
-- **去重**：skill_id + 归一化 name 两级去重，跨来源合并
-- **已安装过滤**：已在 `state.installed_skill_ids` 中的跳过
-- **冷却过滤**：`last_actions` 中 14 天内拒绝过的跳过；30 天内推荐过的跳过。`rejected_skill_ids` 仅作历史记录，不永久封禁
-- **质量过滤**：描述 < 20 字、黑名单类别 → 丢弃
-- **每日限额**（daily 模式）：今天 history 中已有任何推荐记录 → 全部过滤
+- low：manual/daily 都可推荐。
+- medium：manual 可推荐但必须标注风险；daily 不推荐。
+- high：永不推荐。
+- 来源未知、X/Twitter、元数据不足至少 medium。
+- 命中危险模式、请求敏感凭据、要求全盘文件/浏览器 cookie/SSH/环境变量权限时，至少 medium；明显危险时 high。
+- 候选已有风险标记时只升不降。
 
-安全判定规则（脚本输出 risk_level）：
+## 排序策略
 
-| risk_level | 手动推荐 | 每日推送 |
-|------------|----------|----------|
-| low | ✅ 可推 | ✅ 可推 |
-| medium | ⚠️ 可推但标注风险 | ❌ 脚本自动过滤 |
-| high | ❌ 脚本自动过滤 | ❌ 脚本自动过滤 |
+先过滤，再排序。排序时不要让“用户已安装过某类 skill”主导结果。
 
-> 安全风险只升不降：如果候选已有 risk_level，最终取 max(existing, scanned)。
+manual / 当前任务型推荐：
 
-### Step 4: Agent 排序
+1. 当前任务匹配度：候选是否直接解决用户此刻的需求。
+2. 能力缺口匹配度：候选是否补齐当前 Agent 缺的关键能力。
+3. 长期场景/领域匹配度：候选是否贴合用户反复出现的行业或生活/工作场景。
+4. 生产力跃迁价值：候选是否显著减少重复步骤、打开新流程或提升输出质量。
+5. 多源可信度和安全：来源是否可靠、是否有安装说明、是否低风险。
+6. 网络趋势热度：近期是否被多个来源提到或维护活跃。
+7. 已安装 skill 互补性：只作为小权重 tie-breaker，不可覆盖前六项。
 
-Agent 根据以下维度对 shortlist 排序（自然语言判断，不调脚本）：
+daily / 探索型推荐：
 
-1. **请求匹配度**：候选类别/描述是否命中用户请求关键词（权重最高）
-2. **已安装互补性**：候选是否与已安装 skill 形成工作流互补
-3. **工具链适配**：候选所需工具是否与 Agent 已有工具重叠
-4. **生态热度**：stars/downloads 越高越好
-5. **新鲜度**：最近更新的优先（但不要太旧，超过 180 天降权）
+1. 长期场景/领域匹配度
+2. 网络趋势热度
+3. 能力缺口匹配度
+4. 生产力跃迁价值
+5. 多源可信度和安全
+6. 多样性/新鲜度
+7. 已安装 skill 互补性
 
-**冷启动策略**（无历史推荐记录的前几轮）：
-- 优先推与已安装 skill 类别互补的方向
-- 如果没有明确方向 → 推生态热度最高的
-- 不再使用硬编码的 devops→coding→productivity 顺序
+冷启动时不要使用固定 `devops → coding → productivity` 顺序。优先满足当前请求、workspace 强信号、长期场景线索、大众高频场景和近期可靠趋势；已安装 skill 只用于避免重复和轻量互补。
 
-**多样性**（有历史记录后）：
-- 如果同类 skill 连续推了 3 次以上 → 优先换方向
-- 刚装了某类 skill 的 7 天内 → 临时偏好同类
+## 输出格式
 
-### Step 5: 输出推荐
+推荐输出不要用 markdown 表格。使用这个结构：
 
-选得分最高的候选输出。格式：
+```text
+今日推荐
 
-```
-📡 今日推荐
+【skill 名称】
 
-**【skill 名称】**
+为什么推荐给你：<当前任务/长期场景 + 能力缺口 + 生产力跃迁的一句话>
 
-为什么推荐给你：<一句话，基于实际使用的证据>
+适合场景：<办公/学习/资料整理/生活事务等大众场景>
 
-能力亮点：<1-2 句>
+能力亮点：<1-2 句话>
 
-工具链适配：该 skill 使用 <toolset>，与你的 <已有工具/已装 skill> 配合顺畅
+工具链适配：该 skill 使用 <toolset>，与你的 <已有工具/已装 skill/当前任务> 配合顺畅
+
+趋势证据：<仅在已追踪到多个来源出现、近期更新或热度增长时输出；没有证据时整行省略>
 
 来源：<URL>
 安全状态：来源 <来源名> | 风险等级：<low/medium>
@@ -204,83 +334,66 @@ Agent 根据以下维度对 shortlist 排序（自然语言判断，不调脚本
 操作：回复「同意安装」「暂不安装」「关闭每日推荐」
 ```
 
-**规则**：
-- 如果没有合适候选 → 沉默，不发推荐
-- 如果是 medium 风险且手动触发 → 追加一句「⚠️ 该 skill 来源可信度一般，安装前建议自行审查」
-- 如果是每日推送且这是首次使用 → 消息末尾不追加询问（授权状态由 Step 0 处理）
+规则：
 
-### Step 6: 记录展示 + 处理反馈
+- 推荐理由必须说明使用了哪些可见证据。
+- 不声称使用不可见的长期历史、工具调用统计或未读取的数据。
+- 如果使用长期场景，说明它来自当前会话、可见状态、workspace 或明确反馈。
+- 如果使用趋势证据，说明具体来源或可见信号；不要只写“最近很火”。如果没有追踪到趋势数据，把趋势分视为 0，不输出「趋势证据」行，这不算格式不一致。
+- manual 输出 medium 风险时追加风险提醒。
+- daily 不输出 medium 风险候选。
+- 无合格候选时不硬推。
 
-**输出推荐后，立刻记录展示：**
+## 反馈与状态
+
+优先用 `StateCapability` 记录状态。没有免审批状态能力时，反馈可以降级为对话偏好。
+
+可记录的推荐事实包括：`shown`、`accepted`、`rejected`、daily 授权状态、daily 失败提醒状态、最近展示类别、可见场景线索和今日探索主题。场景线索只保存可解释事实，例如“最近多次请求文档处理/学习资料整理”，不要保存无法追溯的复杂画像。
+
+`scenario_memory` 和 `daily_rotation` 的维护责任在 Agent 或平台状态能力，不在 `feedback.py`。本地 helper 只处理确定性反馈和授权状态；如果未来确认某个平台能免审批写状态，再增加专门 helper 命令。
+
+可选 helper：
+
 ```bash
-python3 scripts/feedback.py shown --skill-id "clawhub:skill-name" --skill-name "Skill Name" --categories "devops,automation" --skill-url "https://..."
-```
-> 必须调用！否则 history 不完整，「每天最多 1 个」「30 天去重」等逻辑都会失真。
-
-**收到用户回复后，调用 feedback.py：**
-
-```bash
-# 同意安装
-python3 scripts/feedback.py accept --skill-id "clawhub:skill-name" --categories "devops,automation"
-  → 更新最近的 shown 记录为 accepted，写入 installed/accepted，该类别 accepted +1
-
-# 暂不安装
-python3 scripts/feedback.py reject --skill-id "clawhub:skill-name" --categories "security"
-  → 更新最近的 shown 记录为 rejected，写入 14 天冷却
-
-# 记录已经询问过每日推荐
+python3 scripts/feedback.py shown --skill-id "..." --skill-name "..." --categories "..." --skill-url "..."
+python3 scripts/feedback.py accept --skill-id "..." --categories "..."
+python3 scripts/feedback.py reject --skill-id "..." --categories "..."
 python3 scripts/feedback.py prompt-daily --source manual
-  → 设 daily_rec_status = "prompted"
-
-# 开启每日推荐
 python3 scripts/feedback.py enable-daily
-  → 设 daily_rec_status = "enabled"
-  → Agent 随后用 cronjob 工具创建名为 skill-recommender-daily 的定时任务
-
-# 关闭每日推荐
 python3 scripts/feedback.py disable-daily
-  → 设 daily_rec_status = "disabled"
-  → Agent 随后用 cronjob 工具删除 skill-recommender-daily 定时任务
-
-# 当前 Agent 不支持定时任务
 python3 scripts/feedback.py unsupported-daily
-  → 设 daily_rec_status = "unsupported"
 ```
 
-## 每日推荐授权
+只在不触发审批时使用这些 helper。若会触发审批，不要为了记录状态打断用户。
 
-每日推荐是核心能力，应优先在安装后通过 `[AGENT POST-INSTALL HOOK]` 询问开启。运行时仍需遵守以下规则：
+每日推荐授权规则：
 
-1. 每日推送永远只有 `daily_rec_status == "enabled"` 时才运行
-2. 如果安装后没有机会执行 post-install hook，且后续 manual 流程中发现 `daily_rec_status == "unset"`，可以先调用 `feedback.py prompt-daily --source manual`，再询问是否开启 daily
-3. `prompted`、`enabled`、`disabled`、`unsupported` 状态下不自动重复询问 daily
-4. 询问 daily 必须遵守 one-question-per-turn：如果当前回复已经在问安装推荐 skill 或补齐基础能力，不要同时询问 daily
-5. 用户回复「开启」→ 调 `feedback.py enable-daily` + 创建 cron/automation
-6. 用户回复「不用」→ 调 `feedback.py disable-daily`，只更新状态，不创建 cron
-7. 当前 Agent 不支持定时任务 → 调 `feedback.py unsupported-daily`
-
-## 硬规则
-
-1. 每天最多推荐 1 个
-2. 绝不未经同意自动安装
-3. high 风险永不推荐；medium 风险只可手动推荐且必须标注
-4. 无合格候选就沉默（不硬推）
-5. 不用 markdown 表格
-6. 推荐理由必须说明使用了哪几类证据（格式：「基于你装的 X 类 skill 和最近对 Y 的关注」）
-7. 不声称使用不可见的历史数据
+1. 只有 `daily_rec_status == "enabled"` 才运行 daily。
+2. `prompted`、`enabled`、`disabled`、`unsupported` 状态下不自动重复询问 daily。
+3. manual 推荐后只有 `daily_rec_status == "unset"` 且当前回复没有其他授权问题时，才可以补问 daily。
+4. 询问 daily 前先标记为 `prompted`，防止 post-install 和 manual 重复问。
+5. 用户回复「开启」：状态设为 `enabled` 并创建 automation。
+6. 用户回复「不用」：状态设为 `disabled`。
+7. 当前 Agent 不支持定时任务：状态设为 `unsupported`。
 
 ## 本地脚本
 
 | 脚本 | 用途 | 类型 |
 |------|------|------|
-| `scripts/candidate_filter.py` | 去重 + 冷却 + 已安装过滤 | 确定性 |
-| `scripts/security.py` | 来源可信度 + 元数据 + 模式扫描 | 确定性 |
-| `scripts/feedback.py` | 处理用户反馈（accept/reject/enable/disable） | 确定性 |
-| `scripts/state_store.py` | 状态/历史 JSON 读写 | 确定性 |
+| `scripts/candidate_filter.py` | 去重 + 冷却 + 已安装过滤 | 可选 helper |
+| `scripts/security.py` | 来源可信度 + 元数据 + 模式扫描 | 可选 helper |
+| `scripts/feedback.py` | 处理用户反馈和 daily 状态 | 可选 helper |
+| `scripts/state_store.py` | 状态/历史 JSON 读写 | 可选 helper |
+
+这些脚本不得联网、安装依赖或调用外部命令。如果当前 Agent 会为本地脚本弹审批，跳过脚本并按本文规则执行。
 
 ## 常见踩坑
 
-1. **候选收集失败** → 检查渠道可访问性；使用备用搜索词；降级到本地缓存
-2. **推荐不准** → 检查 Step 1 的信号收集是否完整；有历史后偏好会自动调整
-3. **cron 不执行** → 用当前 Agent 的 cron list 查看任务状态；确认 daily_rec_status == "enabled"
-4. **拒绝太多** → 可能是方向偏了，让用户说「调整推荐偏好」重新探索
+1. **弹出命令审批**：不要继续跑命令；回到 no-approval 搜索/浏览路径。
+2. **只有 shell 能联网**：manual 提示启用原生搜索/浏览能力；daily 走失败提醒。
+3. **daily 没有搜索能力**：最多提醒一次，并提供“不再提醒”。
+4. **已安装权重过重**：把已安装 skill 降回去重、覆盖判断和 5% tie-breaker，不要当主偏好。
+5. **热门但没价值**：趋势只能加分，不能替代任务匹配、安全和生产力跃迁。
+6. **推荐不准**：检查是否使用了真实可见证据，是否过度偏向 coding。
+7. **cron 不执行**：检查 `daily_rec_status == "enabled"` 和当前 Agent 的 scheduler/automation 状态。
+8. **Hermes 上搜 GitHub API 不要用 curl**：Hermes 没有 `web_search` 原生工具，搜候选时容易下意识用 `curl | python3` 调 GitHub API，这会触发审批。正确做法是用 `browser_navigate` 打开 github.com/search 或直接浏览仓库页面读结果；本地脚本（`candidate_filter.py`、`security.py`、`feedback.py`）不联网所以不触发审批，可以放心跑。

@@ -28,7 +28,7 @@ SOURCE_PRIORITY: Dict[str, int] = {
     "mcpmarket": 4,
     "smithery": 3,
     "glama": 2,
-    "github": 1,
+    "github": 2,
     "x": 1,
 }
 

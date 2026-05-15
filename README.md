@@ -47,7 +47,7 @@ skill-recommender/
 │   ├── feedback.py           ← shown / accept / reject / enable-daily / disable-daily
 │   └── state_store.py        ← JSON 持久化
 ├── data/
-│   ├── state.json            ← 运行状态（tri-state daily_rec_status）
+│   ├── state.json            ← 运行状态（5-state daily_rec_status + failure notice）
 │   ├── history.json          ← 推荐历史
 │   ├── profile.json          ← 用户画像（可选）
 │   └── complement_pairs.json ← 工作流互补关系
@@ -77,8 +77,6 @@ python3 scripts/feedback.py unsupported-daily
 
 `shown` 应在输出推荐后立即调用；后续 `accept/reject` 会更新最近的 shown 记录，而不是新增重复推荐记录。拒绝默认是 14 天冷却，不是永久封禁。
 
-## 版本
+## 备注
 
-- **v3.0.0** — Agent-readable protocol：决策规则在 SKILL.md，脚本只做确定性操作（当前版本）
-- v2.0.0 — 伪推荐引擎：脚本抢决策权（已废弃）
-- v1.0.0 — 过滤+打分流水线（见 v1-archive/）
+脚本是可选 helper。推荐主流程应优先使用 Agent 原生搜索/浏览能力；本地脚本只在不触发审批时用于去重、安全扫描和状态记录。
