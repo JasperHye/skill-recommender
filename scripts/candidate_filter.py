@@ -101,37 +101,48 @@ def dedupe(candidates: List[Dict]) -> List[Dict]:
     """
     # 第一级：skill_id
     by_id: Dict[str, Dict] = {}
+    passthrough: List[Dict] = []
     for c in candidates:
         sid = c.get("skill_id") or ""
         if not sid:
+            passthrough.append(c)
             continue
         current = by_id.get(sid)
         if current is None:
+            c.setdefault("cross_source_count", 1)
             by_id[sid] = c
             continue
         prev_priority = SOURCE_PRIORITY.get(str(current.get("source", "")).lower(), 0)
         now_priority = SOURCE_PRIORITY.get(str(c.get("source", "")).lower(), 0)
+        cross_source_count = int(current.get("cross_source_count", 1)) + 1
         if now_priority > prev_priority:
+            c["cross_source_count"] = cross_source_count
             by_id[sid] = c
+        else:
+            current["cross_source_count"] = cross_source_count
 
     # 第二级：归一化 name（跨来源合并）
     by_name: Dict[str, Dict] = {}
     for c in by_id.values():
         norm = _normalize_name(c.get("name", ""))
         if not norm:
+            passthrough.append(c)
             continue
         current = by_name.get(norm)
         if current is None:
+            c.setdefault("cross_source_count", 1)
             by_name[norm] = c
         else:
             prev_priority = SOURCE_PRIORITY.get(str(current.get("source", "")).lower(), 0)
             now_priority = SOURCE_PRIORITY.get(str(c.get("source", "")).lower(), 0)
+            cross_source_count = int(current.get("cross_source_count", 1)) + 1
             if now_priority > prev_priority:
+                c["cross_source_count"] = cross_source_count
                 by_name[norm] = c
-            # 标记跨源
-            by_name[norm]["cross_source_count"] = by_name[norm].get("cross_source_count", 1) + 1
+            else:
+                current["cross_source_count"] = cross_source_count
 
-    return list(by_name.values())
+    return passthrough + list(by_name.values())
 
 
 # ═══════════════════════════════════════════════════════════
@@ -263,8 +274,9 @@ def filter_candidates(
             continue
 
         updated = _parse_iso(c.get("updated_at"))
-        downloads = float(c.get("popularity", {}).get("downloads", 0) or 0)
-        stars = float(c.get("popularity", {}).get("stars", 0) or 0)
+        popularity = c.get("popularity") or {}
+        downloads = float(popularity.get("downloads", 0) or 0)
+        stars = float(popularity.get("stars", 0) or 0)
         if _days_between(now, updated) > stale_days and (downloads + stars) < 50:
             dropped.append({"skill_id": sid, "reason": "stale_and_low_popularity"})
             continue

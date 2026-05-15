@@ -24,7 +24,7 @@ DATA_DIR = PROJECT_DIR / "data"
 
 # cron 任务配置 — 只写最小信息，具体流程由 SKILL.md 定义
 CRON_JOB_NAME = "skill-recommender-daily"
-CRON_SCHEDULE = "0 2 * * *"  # 10:00 Asia/Shanghai = 02:00 UTC
+CRON_SCHEDULE = "0 10 * * *"  # 10:00 in the scheduler's local timezone
 CRON_PROMPT = (
     "Load the skill-recommender skill and run its no-approval daily workflow. "
     "If daily_rec_status is not 'enabled', stop silently. "
