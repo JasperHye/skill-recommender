@@ -1,7 +1,7 @@
-"""状态持久化模块（v3）。
+"""状态持久化模块。
 
 确定性操作：读写 JSON 文件。不做任何推理或默认策略决策。
-v3 关键变更：daily_rec_status 改为授权状态机
+关键规则：daily_rec_status 使用授权状态机
 （unset | prompted | enabled | disabled | unsupported）。
 """
 
@@ -25,6 +25,11 @@ DEFAULT_STATE: Dict[str, Any] = {
     "daily_failure_notice_status": "unset",
     "daily_failure_notice_reason": None,
     "daily_failure_notice_last_shown_at": None,
+    "auto_update_status": "ask",
+    "last_update_check_at": None,
+    "last_seen_remote_version": None,
+    "last_update_notice_at": None,
+    "update_notice_status": "unset",
     "push_time_local": "10:00",
     "timezone": "Asia/Shanghai",
     "profile_version": 3,

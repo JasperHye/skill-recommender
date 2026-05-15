@@ -2,6 +2,8 @@
 
 Agent 驱动的技能推荐协议。SKILL.md 定义决策规则由 Agent 执行，脚本只做确定性状态操作。
 
+当前仓库发布版本：`1.0.0`。版本信息见 `VERSION.json`。
+
 ## 设计原则
 
 - **Agent 判断，脚本验证** — 上下文推理、排序、话术由 Agent 决定；脚本只做去重/安全/反馈
@@ -35,19 +37,27 @@ cp -r skill-recommender ~/.hermes/skills/
 
 管理命令：「关闭每日推荐」「调整推荐偏好」
 
+### 推荐后更新检查
+
+Skill Recommender 会在 manual/daily 推荐完成后，使用当前 Agent 的原生搜索、WebFetch、浏览器或 GitHub connector 检查远端 `VERSION.json`。如果发现新版本，会在推荐内容末尾询问是否更新。
+
+更新检查不会挡在推荐前面；没有无审批联网/读取能力时会静默跳过。用户明确回复「更新」后，Agent 才会使用平台原生 skill update / installer 能力，或在确认不会触发审批的情况下使用 git 更新。
+
 ## 文件结构
 
 ```
 skill-recommender/
 ├── SKILL.md                  ← Agent 加载入口（决策规则）
 ├── README.md                 ← 你正在看
+├── VERSION.json              ← 仓库发布版本
+├── LICENSE                   ← MIT License
 ├── scripts/
 │   ├── candidate_filter.py   ← 去重 + 冷却 + 已安装过滤 + 每日限额
 │   ├── security.py           ← 三层安全扫描（L1来源 + L2元数据 + L3模式）
 │   ├── feedback.py           ← shown / accept / reject / enable-daily / disable-daily
 │   └── state_store.py        ← JSON 持久化
 ├── data/
-│   ├── state.json            ← 运行状态（5-state daily_rec_status + failure notice）
+│   ├── state.json            ← 运行状态（daily / failure notice / update notice）
 │   ├── history.json          ← 推荐历史
 │   ├── profile.json          ← 用户画像（可选）
 │   └── complement_pairs.json ← 工作流互补关系
@@ -80,3 +90,13 @@ python3 scripts/feedback.py unsupported-daily
 ## 备注
 
 脚本是可选 helper。推荐主流程应优先使用 Agent 原生搜索/浏览能力；本地脚本只在不触发审批时用于去重、安全扫描和状态记录。
+
+## License
+
+MIT License. Copyright (c) 2026 JasperHye.
+
+You may use, copy, modify, and distribute this skill, including commercially, provided that the copyright notice and license notice are included in all copies or substantial portions of the software.
+
+If you use or adapt this skill, attribution to this repository is appreciated:
+
+https://github.com/JasperHye/skill-recommender

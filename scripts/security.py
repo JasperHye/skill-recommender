@@ -1,10 +1,10 @@
-"""安全扫描模块（v3 三层防线）。
+"""安全扫描模块（三层防线）。
 
 L1: 来源可信度
 L2: 元数据完整性
 L3: 危险模式扫描 / AgentGuard 深度扫描
 
-v3 关键变更：
+关键规则：
 - 风险只升不降：读取候选已有的 risk_level，最终取 max(existing, scanned)
 - --mode daily：medium 风险进入 blocked
 """
