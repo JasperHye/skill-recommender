@@ -23,7 +23,9 @@ cp -r skill-recommender ~/.hermes/skills/
 # Claude Code / OpenClaw / Codex 同理
 ```
 
-安装或更新后，Agent 应读取 `SKILL.md` 里的 `AGENT POST-INSTALL HOOK`。如果 `daily_rec_status` 还是 `unset`，Agent 会先调用 `scripts/feedback.py prompt-daily --source post_install` 记录“已询问”，再只询问一次是否开启每日推荐。用户回复「开启」后，Agent 调用 `scripts/feedback.py enable-daily` 并用返回的 cron 信息创建 `skill-recommender-daily` 定时任务。
+安装或更新后，Agent 应读取 `SKILL.md` 里的 `AGENT POST-INSTALL HOOK`。如果外部持久状态里的 `daily_rec_status` 还是 `unset`，Agent 会先调用 `scripts/feedback.py prompt-daily --source post_install` 记录“已询问”，再只询问一次是否开启每日推荐。用户回复「开启」后，Agent 调用 `scripts/feedback.py enable-daily` 并用返回的 cron 信息创建 `skill-recommender-daily` 定时任务。
+
+用户状态默认保存在 skill 目录之外：`~/.hermes/state/skill-recommender/state.json`。仓库内 `data/state.json` 只是模板，避免重新安装 skill 时把 daily 授权状态重置掉。
 
 ### 触发
 
@@ -57,8 +59,8 @@ skill-recommender/
 │   ├── feedback.py           ← shown / accept / reject / enable-daily / disable-daily
 │   └── state_store.py        ← JSON 持久化
 ├── data/
-│   ├── state.json            ← 运行状态（daily / failure notice / update notice）
-│   ├── history.json          ← 推荐历史
+│   ├── state.json            ← 状态模板（真实用户状态在外部持久目录）
+│   ├── history.json          ← 历史模板（真实推荐历史在外部持久目录）
 │   ├── profile.json          ← 用户画像（可选）
 │   └── complement_pairs.json ← 工作流互补关系
 └── references/
@@ -70,7 +72,9 @@ skill-recommender/
 ```bash
 # 候选过滤
 python3 scripts/candidate_filter.py --mode manual|daily \
-  --input candidates.json --state data/state.json --history data/history.json
+  --input candidates.json \
+  --state ~/.hermes/state/skill-recommender/state.json \
+  --history ~/.hermes/state/skill-recommender/history.json
 
 # 安全扫描
 python3 scripts/security.py --mode manual|daily --input filtered.json
@@ -86,6 +90,8 @@ python3 scripts/feedback.py unsupported-daily
 ```
 
 `shown` 应在输出推荐后立即调用；后续 `accept/reject` 会更新最近的 shown 记录，而不是新增重复推荐记录。拒绝默认是 14 天冷却，不是永久封禁。
+
+`feedback.py` 不传 `--state/--history` 时，会默认使用外部持久目录。可用 `SKILL_RECOMMENDER_STATE_DIR=/path/to/state-dir` 覆盖。
 
 ## 备注
 

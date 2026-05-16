@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict
 
@@ -56,11 +57,42 @@ DEFAULT_STATE: Dict[str, Any] = {
 }
 
 
+def default_state_dir() -> Path:
+    """Return the persistent state directory outside the skill install folder."""
+    configured = os.environ.get("SKILL_RECOMMENDER_STATE_DIR")
+    if configured:
+        return Path(configured).expanduser()
+
+    hermes_home = os.environ.get("HERMES_HOME")
+    if hermes_home:
+        return Path(hermes_home).expanduser() / "state" / "skill-recommender"
+
+    home = Path.home()
+    hermes_dir = home / ".hermes"
+    if hermes_dir.exists():
+        return hermes_dir / "state" / "skill-recommender"
+
+    return home / ".skill-recommender"
+
+
+def default_state_path() -> Path:
+    return default_state_dir() / "state.json"
+
+
+def default_history_path() -> Path:
+    return default_state_dir() / "history.json"
+
+
 def load_json(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
     if not path.exists():
         return default.copy()
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            merged = default.copy()
+            merged.update(loaded)
+            return merged
+        return default.copy()
     except (json.JSONDecodeError, OSError):
         return default.copy()
 

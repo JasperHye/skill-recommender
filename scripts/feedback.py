@@ -18,16 +18,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from state_store import DEFAULT_STATE, default_history_path, default_state_path
+
 # 项目根目录（skill-recommender/）
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_DIR / "data"
+LEGACY_STATE_PATH = DATA_DIR / "state.json"
+LEGACY_HISTORY_PATH = DATA_DIR / "history.json"
 
 # cron 任务配置 — 只写最小信息，具体流程由 SKILL.md 定义
 CRON_JOB_NAME = "skill-recommender-daily"
 CRON_SCHEDULE = "0 10 * * *"  # 10:00 in the scheduler's local timezone
 CRON_PROMPT = (
     "Load the skill-recommender skill and run its no-approval daily workflow. "
-    "If daily_rec_status is not 'enabled', stop silently. "
+    "Read persistent state outside the skill install directory; data/state.json "
+    "is only a template. If daily_rec_status is not 'enabled', stop silently. "
     "Use Agent-native search/browser tools for candidate discovery. "
     "Do not use shell, curl, wget, python one-liners, git, gh, npm, pip, uvx, "
     "external CLI search, dependency installation, or network-output pipes. "
@@ -44,16 +49,45 @@ def _utc_now() -> str:
 
 def _load_json(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
     if not path.exists():
-        return default
+        return default.copy()
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            merged = default.copy()
+            merged.update(loaded)
+            return merged
+        return default.copy()
     except (json.JSONDecodeError, OSError):
-        return default
+        return default.copy()
 
 
 def _save_json(path: Path, data: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _migrate_legacy_json(target_path: Path, legacy_path: Path, default: Dict[str, Any]) -> None:
+    """Copy legacy in-skill state to persistent storage once, when useful."""
+    if target_path.exists() or not legacy_path.exists() or target_path == legacy_path:
+        return
+    legacy = _load_json(legacy_path, default)
+    if legacy == default:
+        return
+    _save_json(target_path, legacy)
+
+
+def _state_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    if path == default_state_path():
+        _migrate_legacy_json(path, LEGACY_STATE_PATH, DEFAULT_STATE)
+    return path
+
+
+def _history_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    if path == default_history_path():
+        _migrate_legacy_json(path, LEGACY_HISTORY_PATH, {"recommendations": []})
+    return path
 
 
 def _find_latest_shown(history: Dict[str, Any], skill_id: str) -> Optional[Dict[str, Any]]:
@@ -115,7 +149,7 @@ def accept(
     skill_url: str = "",
 ) -> None:
     """记录用户同意安装一个 skill。"""
-    state = _load_json(state_path, {})
+    state = _load_json(state_path, DEFAULT_STATE)
     history = _load_json(history_path, {"recommendations": []})
 
     installed = state.setdefault("installed_skill_ids", [])
@@ -163,7 +197,7 @@ def reject(
     skill_name: str = "",
 ) -> None:
     """记录用户拒绝一个 skill。"""
-    state = _load_json(state_path, {})
+    state = _load_json(state_path, DEFAULT_STATE)
     history = _load_json(history_path, {"recommendations": []})
 
     # Append-only audit history. Filtering uses last_actions timestamps so a
@@ -211,7 +245,7 @@ def shown(
     必须在输出推荐后立刻调用，否则 history 不完整，
     导致「每天最多 1 个」「30 天去重」等逻辑失真。
     """
-    state = _load_json(state_path, {})
+    state = _load_json(state_path, DEFAULT_STATE)
     history = _load_json(history_path, {"recommendations": []})
 
     existing_shown = _find_latest_shown(history, skill_id)
@@ -249,7 +283,7 @@ def shown(
 
 def enable_daily(state_path: Path) -> Dict[str, Any]:
     """开启每日推荐。返回 cron 创建所需信息。"""
-    state = _load_json(state_path, {})
+    state = _load_json(state_path, DEFAULT_STATE)
     state["daily_rec_status"] = "enabled"
     _save_json(state_path, state)
 
@@ -266,7 +300,7 @@ def enable_daily(state_path: Path) -> Dict[str, Any]:
 
 def prompt_daily(state_path: Path, source: str = "manual") -> Dict[str, Any]:
     """记录已经询问过每日推荐授权，避免 post-install 和 manual 重复追问。"""
-    state = _load_json(state_path, {})
+    state = _load_json(state_path, DEFAULT_STATE)
     current_status = state.get("daily_rec_status", "unset")
     changed = current_status in {"", None, "unset"}
 
@@ -288,7 +322,7 @@ def prompt_daily(state_path: Path, source: str = "manual") -> Dict[str, Any]:
 
 def disable_daily(state_path: Path) -> Dict[str, Any]:
     """关闭每日推荐。"""
-    state = _load_json(state_path, {})
+    state = _load_json(state_path, DEFAULT_STATE)
     state["daily_rec_status"] = "disabled"
     _save_json(state_path, state)
 
@@ -302,7 +336,7 @@ def disable_daily(state_path: Path) -> Dict[str, Any]:
 
 def unsupported_daily(state_path: Path) -> Dict[str, Any]:
     """记录当前 Agent 环境不支持 cron/automation，避免每次都重复询问。"""
-    state = _load_json(state_path, {})
+    state = _load_json(state_path, DEFAULT_STATE)
     state["daily_rec_status"] = "unsupported"
     state["daily_rec_unsupported_at"] = _utc_now()
     _save_json(state_path, state)
@@ -329,16 +363,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--skill-name", default="")
     p.add_argument("--skill-url", default="")
     p.add_argument("--categories", default="")
-    p.add_argument("--state", default=str(DATA_DIR / "state.json"))
-    p.add_argument("--history", default=str(DATA_DIR / "history.json"))
+    p.add_argument("--state", default=str(default_state_path()))
+    p.add_argument("--history", default=str(default_history_path()))
 
     # reject
     p = sub.add_parser("reject", help="记录拒绝")
     p.add_argument("--skill-id", required=True)
     p.add_argument("--skill-name", default="")
     p.add_argument("--categories", default="")
-    p.add_argument("--state", default=str(DATA_DIR / "state.json"))
-    p.add_argument("--history", default=str(DATA_DIR / "history.json"))
+    p.add_argument("--state", default=str(default_state_path()))
+    p.add_argument("--history", default=str(default_history_path()))
 
     # shown
     p = sub.add_parser("shown", help="记录推荐已展示")
@@ -346,25 +380,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--skill-name", default="")
     p.add_argument("--skill-url", default="")
     p.add_argument("--categories", default="")
-    p.add_argument("--state", default=str(DATA_DIR / "state.json"))
-    p.add_argument("--history", default=str(DATA_DIR / "history.json"))
+    p.add_argument("--state", default=str(default_state_path()))
+    p.add_argument("--history", default=str(default_history_path()))
 
     # enable-daily
     p = sub.add_parser("enable-daily", help="开启每日推荐")
-    p.add_argument("--state", default=str(DATA_DIR / "state.json"))
+    p.add_argument("--state", default=str(default_state_path()))
 
     # prompt-daily
     p = sub.add_parser("prompt-daily", help="记录已询问每日推荐授权")
     p.add_argument("--source", default="manual", choices=["post_install", "manual"])
-    p.add_argument("--state", default=str(DATA_DIR / "state.json"))
+    p.add_argument("--state", default=str(default_state_path()))
 
     # disable-daily
     p = sub.add_parser("disable-daily", help="关闭每日推荐")
-    p.add_argument("--state", default=str(DATA_DIR / "state.json"))
+    p.add_argument("--state", default=str(default_state_path()))
 
     # unsupported-daily
     p = sub.add_parser("unsupported-daily", help="记录当前环境不支持每日推荐定时任务")
-    p.add_argument("--state", default=str(DATA_DIR / "state.json"))
+    p.add_argument("--state", default=str(default_state_path()))
 
     return parser
 
@@ -373,21 +407,23 @@ def main() -> None:
     args = build_parser().parse_args()
 
     categories = [c.strip() for c in args.categories.split(",") if c.strip()] if getattr(args, "categories", "") else []
+    state_path = _state_path(args.state) if hasattr(args, "state") else default_state_path()
+    history_path = _history_path(args.history) if hasattr(args, "history") else default_history_path()
 
     if args.action == "accept":
-        accept(Path(args.state), Path(args.history), args.skill_id, categories, args.skill_name, getattr(args, "skill_url", ""))
+        accept(state_path, history_path, args.skill_id, categories, args.skill_name, getattr(args, "skill_url", ""))
     elif args.action == "reject":
-        reject(Path(args.state), Path(args.history), args.skill_id, categories, args.skill_name)
+        reject(state_path, history_path, args.skill_id, categories, args.skill_name)
     elif args.action == "shown":
-        shown(Path(args.state), Path(args.history), args.skill_id, categories, args.skill_name, getattr(args, "skill_url", ""))
+        shown(state_path, history_path, args.skill_id, categories, args.skill_name, getattr(args, "skill_url", ""))
     elif args.action == "enable-daily":
-        enable_daily(Path(args.state))
+        enable_daily(state_path)
     elif args.action == "prompt-daily":
-        prompt_daily(Path(args.state), args.source)
+        prompt_daily(state_path, args.source)
     elif args.action == "disable-daily":
-        disable_daily(Path(args.state))
+        disable_daily(state_path)
     elif args.action == "unsupported-daily":
-        unsupported_daily(Path(args.state))
+        unsupported_daily(state_path)
 
 
 if __name__ == "__main__":
