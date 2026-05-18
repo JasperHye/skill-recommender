@@ -71,11 +71,11 @@ def _now() -> datetime:
 
 def _get_zone(timezone_name: Optional[str]):
     if not timezone_name:
-        return timezone.utc
+        return datetime.now().astimezone().tzinfo or timezone.utc
     try:
         return ZoneInfo(timezone_name)
     except ZoneInfoNotFoundError:
-        return timezone.utc
+        return datetime.now().astimezone().tzinfo or timezone.utc
 
 
 def _date_key(value: datetime, timezone_name: Optional[str]) -> str:

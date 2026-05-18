@@ -7,13 +7,14 @@
 - 新增 shown 子命令（推荐展示后立即记录）
 - cron prompt 缩短，具体渠道留给 SKILL.md
 - 移除冷启动轮次推进（冷启动由 Agent 根据 history 判空决定）
-- 每日推荐授权改为显式状态机：unset -> prompted -> enabled/disabled/unsupported
+- 每日推荐授权改为显式状态机：unset -> prompted -> pending_schedule -> enabled
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -28,18 +29,10 @@ LEGACY_HISTORY_PATH = DATA_DIR / "history.json"
 
 # cron 任务配置 — 只写最小信息，具体流程由 SKILL.md 定义
 CRON_JOB_NAME = "skill-recommender-daily"
-CRON_SCHEDULE = "0 10 * * *"  # 10:00 in the scheduler's local timezone
+DEFAULT_PUSH_TIME_LOCAL = "10:00"
 CRON_PROMPT = (
-    "Load the skill-recommender skill and run its no-approval daily workflow. "
-    "Read persistent state outside the skill install directory; data/state.json "
-    "is only a template. If daily_rec_status is not 'enabled', stop silently. "
-    "Use Agent-native search/browser tools for candidate discovery. "
-    "Do not use shell, curl, wget, python one-liners, git, gh, npm, pip, uvx, "
-    "external CLI search, dependency installation, or network-output pipes. "
-    "Local deterministic helper scripts are allowed only if they do not trigger "
-    "approval, do not access the network, do not install dependencies, and do "
-    "not call external commands. If no no-approval search/browser capability "
-    "exists, follow the daily failure notice policy."
+    "Load the skill-recommender skill and run the Daily 推荐流程 defined in SKILL.md. "
+    "Use persistent state outside the skill install directory."
 )
 
 
@@ -64,6 +57,19 @@ def _load_json(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
 def _save_json(path: Path, data: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _cron_schedule_from_push_time(push_time_local: str) -> str:
+    """Convert HH:MM local scheduler time into a daily cron expression."""
+    value = (push_time_local or DEFAULT_PUSH_TIME_LOCAL).strip()
+    if not re.fullmatch(r"\d{1,2}:\d{2}", value):
+        value = DEFAULT_PUSH_TIME_LOCAL
+    hour_text, minute_text = value.split(":", 1)
+    hour = int(hour_text)
+    minute = int(minute_text)
+    if hour > 23 or minute > 59:
+        hour, minute = 10, 0
+    return f"{minute} {hour} * * *"
 
 
 def _migrate_legacy_json(target_path: Path, legacy_path: Path, default: Dict[str, Any]) -> None:
@@ -282,17 +288,58 @@ def shown(
 
 
 def enable_daily(state_path: Path) -> Dict[str, Any]:
-    """开启每日推荐。返回 cron 创建所需信息。"""
+    """准备开启每日推荐。返回 cron 创建所需信息，但不直接标记 enabled。"""
+    state = _load_json(state_path, DEFAULT_STATE)
+    state["daily_rec_status"] = "pending_schedule"
+    state["daily_schedule_pending_at"] = _utc_now()
+    state["daily_schedule_failed_at"] = None
+    state["daily_schedule_failure_reason"] = None
+    _save_json(state_path, state)
+
+    result = {
+        "status": "pending_schedule",
+        "cron_job_name": CRON_JOB_NAME,
+        "cron_schedule": _cron_schedule_from_push_time(state.get("push_time_local", DEFAULT_PUSH_TIME_LOCAL)),
+        "cron_prompt": CRON_PROMPT,
+        "cron_skills": ["skill-recommender"],
+        "push_time_local": state.get("push_time_local", DEFAULT_PUSH_TIME_LOCAL),
+        "timezone": state.get("timezone"),
+        "timezone_note": "cron_schedule is interpreted in the scheduler's local timezone unless the platform supports explicit timezone configuration.",
+        "next_step": "Create the automation, then run feedback.py confirm-daily-enabled only after creation succeeds.",
+    }
+    print(json.dumps(result, ensure_ascii=False))
+    return result
+
+
+def confirm_daily_enabled(state_path: Path) -> Dict[str, Any]:
+    """定时任务确认创建成功后，才正式开启每日推荐。"""
     state = _load_json(state_path, DEFAULT_STATE)
     state["daily_rec_status"] = "enabled"
+    state["daily_schedule_confirmed_at"] = _utc_now()
+    state["daily_schedule_failed_at"] = None
+    state["daily_schedule_failure_reason"] = None
     _save_json(state_path, state)
 
     result = {
         "status": "enabled",
         "cron_job_name": CRON_JOB_NAME,
-        "cron_schedule": CRON_SCHEDULE,
-        "cron_prompt": CRON_PROMPT,
-        "cron_skills": ["skill-recommender"],
+    }
+    print(json.dumps(result, ensure_ascii=False))
+    return result
+
+
+def fail_daily_schedule(state_path: Path, reason: str = "schedule_create_failed") -> Dict[str, Any]:
+    """记录定时任务创建失败，避免出现 enabled 但无任务。"""
+    state = _load_json(state_path, DEFAULT_STATE)
+    state["daily_rec_status"] = "prompted"
+    state["daily_schedule_failed_at"] = _utc_now()
+    state["daily_schedule_failure_reason"] = reason
+    _save_json(state_path, state)
+
+    result = {
+        "status": "prompted",
+        "reason": reason,
+        "cron_job_name": CRON_JOB_NAME,
     }
     print(json.dumps(result, ensure_ascii=False))
     return result
@@ -384,7 +431,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--history", default=str(default_history_path()))
 
     # enable-daily
-    p = sub.add_parser("enable-daily", help="开启每日推荐")
+    p = sub.add_parser("enable-daily", help="准备开启每日推荐并返回 cron 配置")
+    p.add_argument("--state", default=str(default_state_path()))
+
+    # confirm-daily-enabled
+    p = sub.add_parser("confirm-daily-enabled", help="确认定时任务已创建成功，正式开启每日推荐")
+    p.add_argument("--state", default=str(default_state_path()))
+
+    # fail-daily-schedule
+    p = sub.add_parser("fail-daily-schedule", help="记录定时任务创建失败")
+    p.add_argument("--reason", default="schedule_create_failed")
     p.add_argument("--state", default=str(default_state_path()))
 
     # prompt-daily
@@ -418,6 +474,10 @@ def main() -> None:
         shown(state_path, history_path, args.skill_id, categories, args.skill_name, getattr(args, "skill_url", ""))
     elif args.action == "enable-daily":
         enable_daily(state_path)
+    elif args.action == "confirm-daily-enabled":
+        confirm_daily_enabled(state_path)
+    elif args.action == "fail-daily-schedule":
+        fail_daily_schedule(state_path, args.reason)
     elif args.action == "prompt-daily":
         prompt_daily(state_path, args.source)
     elif args.action == "disable-daily":

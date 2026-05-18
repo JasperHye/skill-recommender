@@ -23,7 +23,7 @@ cp -r skill-recommender ~/.hermes/skills/
 # Claude Code / OpenClaw / Codex 同理
 ```
 
-安装或更新后，Agent 应读取 `SKILL.md` 里的 `AGENT POST-INSTALL HOOK`。如果外部持久状态里的 `daily_rec_status` 还是 `unset`，Agent 会先调用 `scripts/feedback.py prompt-daily --source post_install` 记录“已询问”，再只询问一次是否开启每日推荐。用户回复「开启」后，Agent 调用 `scripts/feedback.py enable-daily` 并用返回的 cron 信息创建 `skill-recommender-daily` 定时任务。
+安装或更新后，Agent 应读取 `SKILL.md` 里的 `AGENT POST-INSTALL HOOK`。如果外部持久状态里的 `daily_rec_status` 还是 `unset`，Agent 会先调用 `scripts/feedback.py prompt-daily --source post_install` 记录“已询问”，再只询问一次是否开启每日推荐。用户回复「开启」后，Agent 调用 `scripts/feedback.py enable-daily` 获取 cron 信息并进入 `pending_schedule`，创建 `skill-recommender-daily` 定时任务成功后再调用 `scripts/feedback.py confirm-daily-enabled`。
 
 用户状态默认保存在 skill 目录之外：`~/.hermes/state/skill-recommender/state.json`。仓库内 `data/state.json` 只是模板，避免重新安装 skill 时把 daily 授权状态重置掉。
 
@@ -35,7 +35,9 @@ cp -r skill-recommender ~/.hermes/skills/
 
 ### 每日推荐
 
-回复「开启」→ Agent 创建 `skill-recommender-daily` cron 任务，每天早上 10:00 自动推送。
+回复「开启」→ Agent 准备并创建 `skill-recommender-daily` cron 任务；创建成功后状态才会变成 `enabled`，每天早上 10:00 自动推送。
+
+默认推送时间来自外部状态里的 `push_time_local`，格式为 `HH:MM`；`feedback.py enable-daily` 会据此生成 cron schedule。`timezone: null` 表示不假设用户时区，由当前 Agent/scheduler 的本地时区解释。
 
 管理命令：「关闭每日推荐」「调整推荐偏好」
 
@@ -56,7 +58,7 @@ skill-recommender/
 ├── scripts/
 │   ├── candidate_filter.py   ← 去重 + 冷却 + 已安装过滤 + 每日限额
 │   ├── security.py           ← 三层安全扫描（L1来源 + L2元数据 + L3模式）
-│   ├── feedback.py           ← shown / accept / reject / enable-daily / disable-daily
+│   ├── feedback.py           ← shown / accept / reject / enable-daily / confirm-daily-enabled / disable-daily
 │   └── state_store.py        ← JSON 持久化
 ├── data/
 │   ├── state.json            ← 状态模板（真实用户状态在外部持久目录）
@@ -85,6 +87,8 @@ python3 scripts/feedback.py accept --skill-id "..." --categories "devops,web"
 python3 scripts/feedback.py reject --skill-id "..." --categories "devops"
 python3 scripts/feedback.py prompt-daily --source manual
 python3 scripts/feedback.py enable-daily
+python3 scripts/feedback.py confirm-daily-enabled
+python3 scripts/feedback.py fail-daily-schedule --reason "schedule_create_failed"
 python3 scripts/feedback.py disable-daily
 python3 scripts/feedback.py unsupported-daily
 ```
@@ -96,6 +100,10 @@ python3 scripts/feedback.py unsupported-daily
 ## 备注
 
 脚本是可选 helper。推荐主流程应优先使用 Agent 原生搜索/浏览能力；本地脚本只在不触发审批时用于去重、安全扫描和状态记录。
+
+## 作者
+
+JasperHye — [X / Twitter](https://x.com/JasperHye)
 
 ## License
 

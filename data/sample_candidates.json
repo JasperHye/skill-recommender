@@ -19,8 +19,7 @@
       "updated_at": "2026-05-01T00:00:00Z",
       "popularity": {
         "downloads": 3000,
-        "stars": 200,
-        "likes": 100
+        "stars": 200
       },
       "cross_source_count": 2,
       "risk_level": "low",
@@ -47,8 +46,7 @@
       "updated_at": "2026-04-20T00:00:00Z",
       "popularity": {
         "downloads": 5000,
-        "stars": 350,
-        "likes": 200
+        "stars": 350
       },
       "cross_source_count": 3,
       "risk_level": "low",
@@ -74,8 +72,7 @@
       "updated_at": "2026-03-15T00:00:00Z",
       "popularity": {
         "downloads": 2000,
-        "stars": 150,
-        "likes": 80
+        "stars": 150
       },
       "cross_source_count": 1,
       "risk_level": "medium",
@@ -98,8 +95,7 @@
       "updated_at": "2025-01-01T00:00:00Z",
       "popularity": {
         "downloads": 10,
-        "stars": 2,
-        "likes": 5
+        "stars": 2
       },
       "cross_source_count": 1,
       "risk_level": "low",

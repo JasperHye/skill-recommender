@@ -2,7 +2,7 @@
 
 确定性操作：读写 JSON 文件。不做任何推理或默认策略决策。
 关键规则：daily_rec_status 使用授权状态机
-（unset | prompted | enabled | disabled | unsupported）。
+（unset | prompted | pending_schedule | enabled | disabled | unsupported）。
 """
 
 from __future__ import annotations
@@ -17,12 +17,18 @@ DEFAULT_STATE: Dict[str, Any] = {
     "user_id": "local-user",
     # "unset" = 未询问过
     # "prompted" = 已询问但用户未明确同意/拒绝
-    # "enabled" = 用户同意且应存在定时任务
+    # "pending_schedule" = 用户同意，但定时任务尚未确认创建成功
+    # "enabled" = 用户同意且已确认存在定时任务
     # "disabled" = 用户拒绝/关闭
     # "unsupported" = 当前 Agent 不支持 cron/automation
     "daily_rec_status": "unset",
     "daily_rec_prompted_at": None,
     "daily_rec_prompt_source": None,
+    "daily_rec_unsupported_at": None,
+    "daily_schedule_pending_at": None,
+    "daily_schedule_confirmed_at": None,
+    "daily_schedule_failed_at": None,
+    "daily_schedule_failure_reason": None,
     "daily_failure_notice_status": "unset",
     "daily_failure_notice_reason": None,
     "daily_failure_notice_last_shown_at": None,
@@ -32,7 +38,7 @@ DEFAULT_STATE: Dict[str, Any] = {
     "last_update_notice_at": None,
     "update_notice_status": "unset",
     "push_time_local": "10:00",
-    "timezone": "Asia/Shanghai",
+    "timezone": None,
     "profile_version": 3,
     "accepted_skill_ids": [],
     "installed_skill_ids": [],
