@@ -2,12 +2,13 @@
 
 Agent 驱动的技能推荐协议。SKILL.md 定义决策规则由 Agent 执行，脚本只做确定性状态操作。
 
-当前仓库发布版本：`1.0.0`。版本信息见 `VERSION.json`。
+当前仓库发布版本：`1.1.0`。版本信息见 `VERSION.json`。
 
 ## 设计原则
 
 - **Agent 判断，脚本验证** — 上下文推理、排序、话术由 Agent 决定；脚本只做去重/安全/反馈
 - **证据透明** — 推荐理由必须说明依据来源，不编造不可见数据
+- **每日精选感** — daily 推荐优先呈现热门、有趣、日常可用、让人想试的新能力
 - **风险只升不降** — 安全扫描结果不会覆盖已有的更高风险标记
 
 ## 使用
@@ -43,7 +44,7 @@ cp -r skill-recommender ~/.hermes/skills/
 
 ### 推荐后更新检查
 
-Skill Recommender 会在 manual/daily 推荐完成后，使用当前 Agent 的原生搜索、WebFetch、浏览器或 GitHub connector 检查远端 `VERSION.json`。如果发现新版本，会在推荐内容末尾询问是否更新。
+Skill Recommender 会在 manual/daily 推荐完成后，使用当前 Agent 的原生搜索、WebFetch、浏览器或 GitHub connector 检查远端 `VERSION.json`。只有远端版本严格大于本地 `VERSION.json` 版本时，才会在推荐内容末尾询问是否更新。
 
 更新检查不会挡在推荐前面；没有无审批联网/读取能力时会静默跳过。用户明确回复「更新」后，Agent 才会使用平台原生 skill update / installer 能力，或在确认不会触发审批的情况下使用 git 更新。
 
